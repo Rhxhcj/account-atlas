@@ -37,7 +37,7 @@ object MsSerializer : KSerializer<Double> {
 @Serializable
 data class Identity(
   val id: String,
-  val type: String = "email",          // "email" | "phone"
+  val type: String = "email",          // "email" | "phone" | "login"
   val value: String = "",
   val label: String = "",
   val color: String = "#0a84ff",
@@ -46,9 +46,32 @@ data class Identity(
   @Serializable(with = MsSerializer::class) val order: Double? = null,
   /** Phone only: an eSIM (no physical card). Written only when true; key omitted otherwise. */
   val esim: Boolean? = null,
+  /** Login only: "wechat" | "apple". Key omitted for email / phone. */
+  val provider: String? = null,
+  /** Login only: id of the email / phone identity this login is bound to. Key omitted when empty. */
+  val via: String? = null,
 ) {
   val isPhone get() = type == "phone"
   val isESim get() = isPhone && esim == true
+  val isLogin get() = type == "login"
+  val isApple get() = isLogin && provider == "apple"
+  val isWechat get() = isLogin && !isApple
+}
+
+/** Identity kinds in wallet order. */
+val KINDS = listOf("email", "phone", "login")
+fun kindRank(t: String) = KINDS.indexOf(t).let { if (it < 0) KINDS.size else it }
+
+fun providerName(p: String?) = if (p == "apple") "Apple 账户" else "微信"
+fun providerColor(p: String?) = if (p == "apple") "#1d1d1f" else "#07c160"
+
+/** 微信号: at least one char. Apple ID: an email, or a phone number with >= 5 digits. */
+fun validLogin(provider: String?, value: String): Boolean {
+  val v = value.trim()
+  if (v.isEmpty()) return false
+  if (provider != "apple") return true
+  if (Regex("""^[^\s@]+@[^\s@]+\.[^\s@]+$""").matches(v)) return true
+  return !v.contains('@') && v.count { it.isDigit() } >= 5 && v.all { it.isDigit() || it in " +-()" }
 }
 
 @Serializable
@@ -84,7 +107,13 @@ val JSON = Json {
 
 fun decodeAtlas(text: String): AtlasData {
   val d = JSON.decodeFromString(AtlasData.serializer(), text)
-  return d.copy(identities = d.identities.map { if (it.esim == false) it.copy(esim = null) else it }, accounts = d.accounts.map { a ->
+  return d.copy(identities = d.identities.map { i ->
+    var x = i
+    if (x.esim == false) x = x.copy(esim = null)
+    if (x.provider != null && x.provider!!.isBlank()) x = x.copy(provider = null)
+    if (x.via != null && x.via!!.isBlank()) x = x.copy(via = null)
+    x
+  }, accounts = d.accounts.map { a ->
     var x = a
     if (x.handle != null && x.handle!!.isEmpty()) x = x.copy(handle = null)
     if (x.icon != null && x.icon!!.isBlank()) x = x.copy(icon = null)

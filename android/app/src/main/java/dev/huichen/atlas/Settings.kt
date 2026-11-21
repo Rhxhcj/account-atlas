@@ -191,8 +191,12 @@ fun OrderPage(back: () -> Unit) {
   Column {
     SheetBar("设置", "卡片顺序", null, onLeft = back, leftIcon = true)
     FormScroll {
-      OrderGroup("email", "邮箱", null)
-      OrderGroup("phone", "手机号", "长按拖动排序，排在第一位的卡会在卡包里最先出现。")
+      // the hint goes under the last group that has cards
+      val last = listOf("login", "phone", "email").firstOrNull { t -> Store.data.identities.any { it.type == t } }
+      val hint = "长按拖动排序，排在第一位的卡会在卡包里最先出现。"
+      OrderGroup("email", "邮箱", if (last == "email") hint else null)
+      OrderGroup("phone", "手机号", if (last == "phone") hint else null)
+      OrderGroup("login", "登录", if (last == "login") hint else null)
     }
   }
 }
@@ -216,7 +220,7 @@ fun OrderGroup(type: String, title: String, footer: String?) {
   var to by remember { mutableIntStateOf(0) }
   var dy by remember { mutableFloatStateOf(0f) }
   LaunchedEffect(ids) { if (dragId == null) order = ids }
-  FormGroup(title, footer ?: if (Store.data.identities.none { it.type == "phone" }) "长按拖动排序，排在第一位的卡会在卡包里最先出现。" else null) {
+  FormGroup(title, footer) {
     order.forEachIndexed { k, id ->
       key(id) {
         val i = list.firstOrNull { it.id == id }
@@ -262,9 +266,8 @@ fun OrderGroup(type: String, title: String, footer: String?) {
                         val updated = s.identities.map { if (it.id in ranked) it.copy(order = ranked[it.id]) else it }
                         val grp = next.mapNotNull { x -> updated.firstOrNull { it.id == x } }
                         val others = updated.filter { it.type != type }
-                        val emails = if (type == "email") grp else others.filter { it.type == "email" }
-                        val phones = if (type == "phone") grp else others.filter { it.type == "phone" }
-                        s.copy(identities = emails + phones + others.filter { it.type != "email" && it.type != "phone" })
+                        val groups = KINDS.map { t -> if (type == t) grp else others.filter { it.type == t } }
+                        s.copy(identities = groups.flatten() + others.filter { it.type !in KINDS })
                       }
                     }
                   }
@@ -284,11 +287,11 @@ fun OrderGroup(type: String, title: String, footer: String?) {
               }
             }
             .padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            SmallCard(i, if (i.isPhone) Icons.Filled.SimCard else Icons.Filled.Email, 46.dp, 30.dp)
+            SmallCard(i, kindIcon(i), 46.dp, 30.dp)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
               T(Store.title(i), 16f, FontWeight.Medium, lines = 1)
-              if (i.label.isNotEmpty()) T(Store.display(i), 13f, color = pal.secondary, lines = 1)
+              if (i.label.isNotEmpty() || i.isLogin) T(Store.display(i), 13f, color = pal.secondary, lines = 1)
             }
             Icon(Icons.Filled.DragHandle, "拖动", tint = pal.tertiary)
           }

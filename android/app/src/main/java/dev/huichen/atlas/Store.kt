@@ -61,7 +61,7 @@ object Store {
     prefs = ctx.getSharedPreferences("atlas", Context.MODE_PRIVATE)
     file = File(ctx.filesDir, "atlas.json")
     privacy = prefs.getBoolean("atlas.privacy", false)
-    kind = prefs.getString("atlas.kind", "email") ?: "email"
+    kind = prefs.getString("atlas.kind", "email")?.takeIf { it in KINDS } ?: "email"
     theme = prefs.getString("atlas.theme", "dark") ?: "dark"
     data = runCatching { decodeAtlas(file.readText()) }.getOrElse { demo() }
     remember()
@@ -83,10 +83,20 @@ object Store {
   fun identity(id: String) = data.identities.firstOrNull { it.id == id }
   fun account(id: String) = data.accounts.firstOrNull { it.id == id }
   fun accountsOf(id: String) = data.accounts.filter { id in it.identityIds }.sortedWith(compareBy(nameOrder) { it.name })
+  /** The email / phone a login card is bound to; a dangling or odd reference counts as none. */
+  fun viaOf(i: Identity): Identity? = if (!i.isLogin) null else i.via?.let { identity(it) }?.takeIf { !it.isLogin && it.id != i.id }
+  /** 微信 / Apple cards bound to this email / phone. */
+  fun loginsVia(id: String) = data.identities.filter { it.isLogin && it.via == id }
+  /** Sites that log in with a 微信 / Apple card bound to this email / phone, minus the ones using it directly. */
+  fun indirectAccounts(id: String): List<Pair<Identity, List<Account>>> {
+    val direct = data.accounts.filter { id in it.identityIds }.map { it.id }.toSet()
+    return loginsVia(id).map { l -> l to accountsOf(l.id).filter { it.id !in direct } }.filter { it.second.isNotEmpty() }
+  }
 
   fun display(i: Identity): String {
     if (!privacy) return i.value
-    if (i.type == "email") {
+    if (i.isWechat) return i.value.take(2) + "•••"
+    if (i.type == "email" || (i.isLogin && i.value.contains('@'))) {
       val parts = i.value.split("@", limit = 2)
       return parts[0].take(2) + "•••" + (if (parts.size > 1) "@" + parts[1] else "")
     }
@@ -94,7 +104,7 @@ object Store {
     return if (digits.length > 7) "••• •••• " + digits.takeLast(4) else "••••"
   }
   fun handleText(h: String) = if (privacy) h.take(1) + "•••" else h
-  fun title(i: Identity) = i.label.ifEmpty { display(i) }
+  fun title(i: Identity) = i.label.ifEmpty { if (i.isLogin) providerName(i.provider) else display(i) }
 
   // every change goes through here: snapshot for undo, stamp, persist, sync
   fun mutate(message: String? = null, undo: Boolean = true, f: (AtlasData) -> AtlasData) {
@@ -215,17 +225,21 @@ object Store {
       Identity(newID(), "phone", "+86 170 0000 5678", "副卡", "#ff9f0a", esim = true),
     )
     val g = ids[0].id; val p1 = ids[1].id; val q = ids[2].id; val o = ids[3].id; val p2 = ids[4].id
+    val wx = Identity(newID(), "login", "atlas_wx", "", "#07c160", provider = "wechat", via = p1)
+    val ap = Identity(newID(), "login", "me@icloud.com", "", "#1d1d1f", provider = "apple", via = g)
+    val w = wx.id; val ai = ap.id
     val day = 86_400_000.0; val now = nowMS()
     fun mk(n: String, d: String, c: String, i: List<String>, ago: Double, notes: String = "") =
       Account(newID(), n, d, c, i, notes, null, (now - ago * day - Random.nextDouble(0.0, 3e6)).let { Math.round(it).toDouble() })
-    return AtlasData(ids, listOf(
+    return AtlasData(ids + wx + ap, listOf(
       mk("GitHub", "github.com", "开发", listOf(o, p1), 0.0, "已开两步验证"), mk("Claude", "claude.ai", "AI", listOf(g), 0.0),
       mk("Cloudflare", "cloudflare.com", "开发", listOf(o), 1.0), mk("ChatGPT", "chatgpt.com", "AI", listOf(g), 1.0),
-      mk("小红书", "xiaohongshu.com", "社交", listOf(p2), 3.0), mk("Binance", "binance.com", "加密", listOf(o, p1), 3.0, "已完成 KYC"),
+      mk("小红书", "xiaohongshu.com", "社交", listOf(w), 3.0), mk("Binance", "binance.com", "加密", listOf(o, p1), 3.0, "已完成 KYC"),
       mk("淘宝", "taobao.com", "购物", listOf(q, p1), 9.0), mk("京东", "jd.com", "购物", listOf(q, p2), 12.0),
       mk("微信", "weixin.qq.com", "社交", listOf(p1), 30.0), mk("支付宝", "alipay.com", "支付金融", listOf(p1), 30.0),
       mk("哔哩哔哩", "bilibili.com", "娱乐", listOf(p2), 40.0), mk("Steam", "steampowered.com", "游戏", listOf(q), 60.0, "令牌在主力手机上"),
-      mk("Apple ID", "apple.com", "工具", listOf(g, p1), 90.0), mk("Notion", "notion.so", "工具", listOf(g), 120.0), mk("网易云音乐", "music.163.com", "娱乐", listOf(p2), 150.0),
+      mk("Apple ID", "apple.com", "工具", listOf(g, p1), 90.0), mk("Notion", "notion.so", "工具", listOf(g), 120.0), mk("网易云音乐", "music.163.com", "娱乐", listOf(p2, ai), 150.0),
+      mk("美团", "meituan.com", "出行", listOf(w), 6.0), mk("拼多多", "pinduoduo.com", "购物", listOf(w), 15.0),
     ), demo = true)
   }
 }
