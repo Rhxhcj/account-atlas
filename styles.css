@@ -740,3 +740,10 @@ html[data-theme=light] .icon-menu{background:rgba(255,255,255,.9);box-shadow:0 1
 .suggest-h{flex:none;align-self:center;padding:0 2px 0 6px;font-size:12px;font-weight:600;color:var(--secondary);letter-spacing:.02em;white-space:nowrap}
 .suggest .fav.full img{width:100%;height:100%}
 html[data-theme=light] .hero-edit{background:#e5e5ea}
+/* long-press menu on your own apps in the picker */
+.pk{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+.pk-menu{position:fixed;top:0;z-index:60;width:236px}
+.pk-menu p{margin:0;padding:11px 16px 10px;font-size:12.5px;line-height:1.45;color:var(--secondary)}
+.pk-menu p+button{box-shadow:inset 0 .5px 0 var(--separator)}
+.pk-menu .destructive,.pk-menu .destructive svg{color:var(--red)}
+.pk-menu svg{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}

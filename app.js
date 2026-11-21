@@ -62,18 +62,29 @@
   // the ones most people have, shown first in the picker
   // apps the user typed in by hand are remembered and show up in the picker
   const isPreset = n => PRESETS.some(p => p[0].toLowerCase() === n.toLowerCase());
+  const readList = k => { try { const v = JSON.parse(localStorage.getItem(k) || '[]'); return Array.isArray(v) ? v : []; } catch (e) { return []; } };
+  // apps removed from 我添加的 (lowercase names); local only, not synced
+  const hiddenApps = () => new Set(readList('atlas.custom.hidden').map(x => String(x).toLowerCase()));
   function myApps() {
-    let saved = []; try { saved = JSON.parse(localStorage.getItem('atlas.custom') || '[]'); } catch (e) {}
+    const saved = readList('atlas.custom'), hidden = hiddenApps();
     const out = [], seen = new Set();
-    const add = t => { const k = (t[0] || '').toLowerCase(); if (!k || seen.has(k) || isPreset(t[0])) return; seen.add(k); out.push([t[0], t[1] || '', t[2] || '其他', '', customIcon({ icon: t[4] }) || '']); };
+    const add = t => { const k = (t[0] || '').toLowerCase(); if (!k || seen.has(k) || hidden.has(k) || isPreset(t[0])) return; seen.add(k); out.push([t[0], t[1] || '', t[2] || '其他', '', customIcon({ icon: t[4] }) || '']); };
     saved.forEach(add); (state.accounts || []).slice().reverse().forEach(a => add([a.name, a.domain, a.category, '', a.icon]));
     return out;
   }
-  function rememberApp(name, domain, cat) {
+  // adding an app (by hand or from the App Store) brings it back if it had been removed from the list
+  function rememberApp(name, domain, cat, icon, unhide = true) {
     if (!name || isPreset(name)) return;
-    let saved = []; try { saved = JSON.parse(localStorage.getItem('atlas.custom') || '[]'); } catch (e) {}
-    saved = saved.filter(t => t[0].toLowerCase() !== name.toLowerCase()); saved.unshift([name, domain || '', cat || '其他']);
-    localStorage.setItem('atlas.custom', JSON.stringify(saved.slice(0, 80)));
+    const k = name.toLowerCase(), hidden = hiddenApps();
+    if (hidden.has(k)) { if (!unhide) return; hidden.delete(k); localStorage.setItem('atlas.custom.hidden', JSON.stringify([...hidden])); }
+    const saved = readList('atlas.custom').filter(t => (t[0] || '').toLowerCase() !== k);
+    saved.unshift(icon ? [name, domain || '', cat || '其他', '', icon] : [name, domain || '', cat || '其他']);
+    try { localStorage.setItem('atlas.custom', JSON.stringify(saved.slice(0, 80))); } catch (e) { localStorage.setItem('atlas.custom', JSON.stringify(saved.slice(0, 20))); }
+  }
+  function forgetApp(name) {
+    const k = (name || '').toLowerCase(); if (!k) return;
+    localStorage.setItem('atlas.custom', JSON.stringify(readList('atlas.custom').filter(t => (t[0] || '').toLowerCase() !== k)));
+    const hidden = hiddenApps(); hidden.add(k); localStorage.setItem('atlas.custom.hidden', JSON.stringify([...hidden].slice(-300)));
   }
   const POPULAR = ['微信', 'QQ', '支付宝', '淘宝', '京东', '拼多多', '抖音', '小红书', '哔哩哔哩', '微博', '美团', '知乎', '网易云音乐', '12306', '百度网盘', 'Apple ID', 'GitHub', 'Google', 'ChatGPT', 'Steam', '豆包', 'DeepSeek', 'Telegram', 'Microsoft'];
 
@@ -815,7 +826,7 @@
         if (!name) { const f = $('#nameField'); f.classList.remove('invalid'); void f.offsetWidth; f.classList.add('invalid'); $('#aName').focus(); toast('填一下名称'); return; }
         const data = { name, handle: $('#aHandle').value.trim(), domain: cleanDomain($('#aDomain').value), category: cat, identityIds: [...sel], notes: $('#aNotes').value.trim() };
         if (icon) data.icon = icon;   // no key at all when there's no custom icon, for older clients
-        let id; rememberApp(data.name, data.domain, data.category);
+        let id; rememberApp(data.name, data.domain, data.category, data.icon, !existing || existing.name.toLowerCase() !== name.toLowerCase());
         if (existing) { Object.assign(existing, data); if (!icon) delete existing.icon; id = existing.id; } else { id = uid(); state.accounts.push({ id, createdAt: Date.now(), ...data }); }
         save(); render(); showAccount(id); toast(existing ? '已保存' : `已添加 ${name}`);
       };
@@ -830,18 +841,22 @@
     const chosen = new Set(), handles = {}; let cat = '常用', q = query, open = -1;
     const have = name => state.accounts.filter(x => x.name.toLowerCase() === name.toLowerCase()).length;
     let told = false;
-    const cats = ['常用', ...(ALL.length > MINE ? ['我添加的'] : []), ...CATS.filter(c => ALL.some(p => p[2] === c))];
+    const gone = new Set(), mine = () => ALL.slice(MINE).some((p, i) => !gone.has(MINE + i));
+    const cats = () => ['常用', ...(mine() ? ['我添加的'] : []), ...CATS.filter(c => ALL.some((p, i) => p[2] === c && !gone.has(i)))];
+    const catsHtml = () => cats().map(c => `<button data-pc="${c}" class="${c === cat ? 'active' : ''}">${c}</button>`).join('');
     openSheet(`<div class="sheet-bar"><button data-close>取消</button><span class="t" id="pkTitle">选择网站或 App</span><button id="pkNext" disabled>下一步</button></div>
       <div class="pick-head">
         <div class="spot-field pk-field"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4-4"/></svg><input id="pkQ" placeholder="搜索，或直接输入名字" value="${esc(q)}" autocomplete="off" enterkeyhint="search"></div>
-        <div class="filters pk-cats" id="pkCats">${cats.map(c => `<button data-pc="${c}" class="${c === cat ? 'active' : ''}">${c}</button>`).join('')}</div>
+        <div class="filters pk-cats" id="pkCats">${catsHtml()}</div>
       </div>
       <div class="sheet-body"><div class="pick-grid" id="pkGrid"></div></div>`, { kind: 'form' });
     const draw = () => {
       const ql = q.trim().toLowerCase();
       let list = ql ? ALL.filter(p => p[0].toLowerCase().includes(ql) || p[1].includes(ql))
-        : cat === '常用' ? [...ALL.slice(MINE, MINE + 4), ...POPULAR.map(n => PRESETS.find(p => p[0] === n)).filter(Boolean)]
+        : cat === '常用' ? POPULAR.slice(0, 12).map(n => PRESETS.find(p => p[0] === n)).filter(Boolean)
         : cat === '我添加的' ? ALL.slice(MINE) : ALL.filter(p => p[2] === cat);
+      list = list.filter(p => !gone.has(ALL.indexOf(p)));
+      menuOff();
       $('#pkCats').style.display = ql ? 'none' : '';
       const exact = ql && ALL.some(p => p[0].toLowerCase() === ql);
       $('#pkGrid').innerHTML = list.map(p => { const k = ALL.indexOf(p), h = have(p[0]); return `<button class="pk ${chosen.has(k) ? 'on' : ''} ${h ? 'had' : ''}" data-pk="${k}">${favIcon({ name: p[0], domain: p[1], icon: p[4] })}<span>${esc(p[0])}</span>${sub(k, h)}<i class="pk-tick">${ICON.check}</i></button>`; }).join('') +
@@ -894,6 +909,44 @@
         setTimeout(() => { const body = $('.sheet-body', sheet); if (!body || !x.isConnected) return; const r = x.getBoundingClientRect(), br = body.getBoundingClientRect(); if (r.bottom > br.bottom - 8) body.scrollBy({ top: r.bottom - br.bottom + 24, behavior: 'smooth' }); }, 200);
       }
     };
+    // long-press (or right-click) one of your own apps to take it off the list
+    const menuOff = () => { const m = $('#pkMenu'); if (!m) return; m.id = ''; m.classList.remove('open'); setTimeout(() => m.remove(), 250); };
+    const menuFor = tile => {
+      const k = +tile.dataset.pk; if (k < MINE || gone.has(k)) return;
+      menuOff(); navigator.vibrate?.(8);
+      const n = have(ALL[k][0]), r = tile.getBoundingClientRect(), m = document.createElement('div');
+      m.className = 'icon-menu pk-menu'; m.id = 'pkMenu';
+      m.innerHTML = `${n ? '<p>只会从这个列表移除，已记录的账号不受影响。</p>' : ''}<button class="destructive" data-rm><span>从列表移除</span><svg viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12.5a1.5 1.5 0 0 0 1.5 1.5h7a1.5 1.5 0 0 0 1.5-1.5L18 7M9 7V4.5h6V7"/></svg></button>`;
+      m.style.left = Math.min(Math.max(r.left + r.width / 2, 122), innerWidth - 122) + 'px';
+      document.body.appendChild(m);
+      const below = r.bottom + 8 + m.offsetHeight < innerHeight - 8;
+      m.style.top = (below ? r.bottom + 8 : r.top - 8 - m.offsetHeight) + 'px'; m.style.transformOrigin = below ? '50% 0' : '50% 100%';
+      tile.animate([{ transform: 'scale(.92)' }, { transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.34,1.45,.64,1)' });
+      requestAnimationFrame(() => m.classList.add('open'));
+      m.querySelector('[data-rm]').onclick = e => { e.stopPropagation(); menuOff(); removeApp(k); };
+    };
+    const removeApp = k => {
+      forgetApp(ALL[k][0]); gone.add(k);
+      if (chosen.has(k)) { chosen.delete(k); delete handles[k]; sync(); }
+      if (open === k) open = -1;
+      shut(false);
+      const grid = $('#pkGrid'), tile = $(`#pkGrid [data-pk="${k}"]`);
+      const after = () => {
+        if (!mine() && cat === '我添加的') {   // nothing left of yours: the tab goes and 常用 takes over
+          cat = '常用'; $('#pkCats').innerHTML = catsHtml(); draw();
+          grid.animate([{ opacity: 0, transform: 'translateY(8px)' }, { opacity: 1, transform: 'none' }], { duration: 320, easing: 'cubic-bezier(.2,.9,.25,1)' });
+          return;
+        }
+        if (!mine()) $('#pkCats').innerHTML = catsHtml();
+        const tiles = [...grid.children], first = new Map(tiles.map(t => [t, t.getBoundingClientRect()]));
+        tile?.remove();
+        tiles.forEach(t => { if (!t.isConnected) return; const a = first.get(t), b = t.getBoundingClientRect(), dx = a.left - b.left, dy = a.top - b.top;
+          if (dx || dy) t.animate([{ transform: `translate(${dx}px,${dy}px)` }, { transform: 'none' }], { duration: 360, easing: 'cubic-bezier(.2,.9,.25,1)' }); });
+      };
+      if (!tile) return after();
+      tile.style.pointerEvents = 'none';
+      tile.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'scale(.5)' }], { duration: 220, easing: 'cubic-bezier(.4,0,1,1)', fill: 'forwards' }).onfinish = after;
+    };
     const sync = () => {
       const n = chosen.size, b = $('#pkNext');
       b.disabled = !n; b.textContent = n ? `下一步（${n}）` : '下一步';
@@ -903,7 +956,25 @@
       draw();
       $('#pkQ').addEventListener('input', e => { q = e.target.value; draw(); });
       $('#pkCats').onclick = e => { const b = e.target.closest('[data-pc]'); if (!b) return; cat = b.dataset.pc; $$('#pkCats button').forEach(x => x.classList.toggle('active', x === b)); draw(); $('.sheet-body', sheet).scrollTop = 0; };
+      let press, pressAt, pressed = false;
+      const grid = $('#pkGrid'), cancelPress = () => { clearTimeout(press); press = 0; };
+      grid.addEventListener('pointerdown', e => {
+        cancelPress(); pressed = false; if (e.button > 0) return;
+        const b = e.target.closest('[data-pk]'); if (!b || +b.dataset.pk < MINE) return;
+        pressAt = [e.clientX, e.clientY];
+        press = setTimeout(() => { press = 0; pressed = true; menuFor(b); }, 500);
+      });
+      grid.addEventListener('pointermove', e => { if (press && Math.hypot(e.clientX - pressAt[0], e.clientY - pressAt[1]) > 10) cancelPress(); });
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach(t => grid.addEventListener(t, cancelPress));
+      grid.addEventListener('contextmenu', e => {
+        const b = e.target.closest('[data-pk]'); if (!b || +b.dataset.pk < MINE) return;
+        e.preventDefault(); if (pressed && $('#pkMenu')) return; cancelPress(); menuFor(b);
+      });
+      const offMenu = e => { if (!$('#pkGrid')) { document.removeEventListener('pointerdown', offMenu, true); return; } if (!e.target.closest('#pkMenu')) menuOff(); };
+      document.addEventListener('pointerdown', offMenu, true);
+      $('.sheet-body', sheet).addEventListener('scroll', menuOff, { passive: true });
       $('#pkGrid').onclick = e => {
+        if (pressed) { pressed = false; return; }   // the long-press already opened the menu
         const c = e.target.closest('[data-pk-custom]');
         if (c) return accountForm(null, presetId, c.dataset.pkCustom);
         const b = e.target.closest('[data-pk]'); if (!b) return;
