@@ -333,25 +333,55 @@ final class Store {
     activeID = focus ?? deck.first?.id ?? "add"
   }
 
-  // apps the user typed in by hand come back in the picker
+  // apps the user typed in by hand come back in the picker.
+  // atlas.custom entries are [name, domain, category, "", icon?] (same shape as the web app);
+  // atlas.custom.hidden holds lowercase names the user removed from 我添加的 (local only, not synced).
+  var customRev = 0   // UserDefaults isn't observed: bump this so views re-read customApps
   var customApps: [Preset] {
+    let _ = customRev
     var out: [Preset] = [], seenN = Set<String>()
+    let hidden = Set((UserDefaults.standard.stringArray(forKey: "atlas.custom.hidden") ?? []).map { $0.lowercased() })
     let saved = (UserDefaults.standard.array(forKey: "atlas.custom") as? [[String]]) ?? []
-    let all = saved + data.accounts.reversed().map { [$0.name, $0.domain, $0.category] }
+    let all = saved + data.accounts.reversed().map { [$0.name, $0.domain, $0.category, "", $0.icon ?? ""] }
     for t in all where t.count >= 1 {
       let k = t[0].lowercased()
-      if k.isEmpty || seenN.contains(k) || Presets.all.contains(where: { $0.name.lowercased() == k }) { continue }
+      if k.isEmpty || seenN.contains(k) || hidden.contains(k) || Presets.all.contains(where: { $0.name.lowercased() == k }) { continue }
       seenN.insert(k)
-      out.append(Preset(name: t[0], domain: t.count > 1 ? t[1] : "", category: t.count > 2 ? t[2] : "其他", color: ""))
+      let ic = t.count > 4 && t[4].hasPrefix("data:image/") ? t[4] : nil
+      out.append(Preset(name: t[0], domain: t.count > 1 ? t[1] : "", category: t.count > 2 ? t[2] : "其他", color: "", icon: ic))
     }
     return out
   }
   func rememberApp(_ p: Preset) {
+    unhideApps([p.name])
     if Presets.all.contains(where: { $0.name.lowercased() == p.name.lowercased() }) { return }
     var saved = (UserDefaults.standard.array(forKey: "atlas.custom") as? [[String]]) ?? []
     saved.removeAll { $0.first?.lowercased() == p.name.lowercased() }
-    saved.insert([p.name, p.domain, p.category], at: 0)
+    var t = [p.name, p.domain, p.category]
+    if let ic = p.icon, !ic.isEmpty { t += ["", ic] }
+    saved.insert(t, at: 0)
     UserDefaults.standard.set(Array(saved.prefix(80)), forKey: "atlas.custom")
+    customRev &+= 1
+  }
+  /// takes an app out of 我添加的; accounts already recorded for it stay untouched
+  func hideApp(_ name: String) {
+    let k = name.lowercased()
+    var saved = (UserDefaults.standard.array(forKey: "atlas.custom") as? [[String]]) ?? []
+    saved.removeAll { $0.first?.lowercased() == k }
+    UserDefaults.standard.set(saved, forKey: "atlas.custom")
+    var hidden = UserDefaults.standard.stringArray(forKey: "atlas.custom.hidden") ?? []
+    if !hidden.contains(k) { hidden.append(k) }
+    UserDefaults.standard.set(hidden, forKey: "atlas.custom.hidden")
+    customRev &+= 1
+  }
+  /// adding an app again (by hand or from the App Store) brings it back
+  func unhideApps(_ names: [String]) {
+    let ks = Set(names.map { $0.lowercased() })
+    let hidden = UserDefaults.standard.stringArray(forKey: "atlas.custom.hidden") ?? []
+    let kept = hidden.filter { !ks.contains($0) }
+    guard kept.count != hidden.count else { return }
+    UserDefaults.standard.set(kept, forKey: "atlas.custom.hidden")
+    customRev &+= 1
   }
 
   func backupJSON() -> Data {

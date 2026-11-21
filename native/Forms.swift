@@ -294,7 +294,7 @@ struct PickerSheet: View {
   @State private var step2 = false
   @State private var manual = false
   @State private var mName = ""
-  @State private var mDomain = ""
+  @State private var removing: Preset? = nil          // 我添加的 tile waiting on the remove confirmation
   @State private var appResults: [AppStoreApp] = []
   @State private var art: [String: String] = [:]      // App Store artwork per picked key, until its icon lands
   @State private var iconFor: String? = nil           // picked key whose icon menu is open
@@ -311,7 +311,7 @@ struct PickerSheet: View {
     if !q.isEmpty { return all.filter { $0.name.lowercased().contains(q) || $0.domain.contains(q) } }
     switch cat {
     case "我添加的": return store.customApps
-    case "常用": return Array(store.customApps.prefix(4)) + Presets.popular.compactMap { n in Presets.all.first { $0.name == n } }
+    case "常用": return Array(Presets.popular.compactMap { n in Presets.all.first { $0.name == n } }.prefix(12))
     default: return Presets.all.filter { $0.category == cat }
     }
   }
@@ -350,8 +350,16 @@ struct PickerSheet: View {
           }.padding(.horizontal, 16)
         }.scrollIndicators(.hidden)
         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6, alignment: .top), count: 4), spacing: 18) {
-          ForEach(list, id: \.self) { p in tile(p) }
-          Button { manual = true; mName = query } label: {
+          ForEach(list, id: \.self) { p in
+            if cat == "我添加的" && query.trimmingCharacters(in: .whitespaces).isEmpty {
+              tile(p)
+                .contextMenu {
+                  Button(role: .destructive) { askRemove(p) } label: { Label("从列表移除", systemImage: "minus.circle") }
+                }
+                .transition(.scale(scale: 0.6).combined(with: .opacity))
+            } else { tile(p) }
+          }
+          Button { mName = query; manual = true } label: {
             VStack(spacing: 6) {
               Image(systemName: "plus").font(.system(size: 22, weight: .medium)).frame(width: 60, height: 60)
                 .background(.glass, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -378,30 +386,46 @@ struct PickerSheet: View {
     }
     .safeAreaInset(edge: .bottom) { if !picked.isEmpty { pickedBar } }
     .sensoryFeedback(.selection, trigger: picked.count)
-    .alert("手动添加", isPresented: $manual) {
-      TextField("名称", text: $mName)
-      TextField("域名（可选）", text: $mDomain).textInputAutocapitalization(.never).keyboardType(.URL)
-      Button("取消", role: .cancel) {}
-      Button("添加") {
-        let n = mName.trimmingCharacters(in: .whitespaces); guard !n.isEmpty else { return }
-        let p = Preset(name: n, domain: cleanDomain(mDomain), category: presetFor(name: n, domain: mDomain)?.category ?? "其他", color: "")
+    .sheet(isPresented: $manual) {
+      ManualAppSheet(initialName: mName) { p in
         store.rememberApp(p)
-        if !picked.contains(where: { key($0) == key(p) }) { picked.append(p) }
-        mName = ""; mDomain = ""; query = ""
+        withAnimation(Motion.snappy) {
+          if let i = picked.firstIndex(where: { key($0) == key(p) }) { picked[i] = p } else { picked.append(p) }
+        }
+        mName = ""; query = ""
       }
-    } message: { Text("名称必填，填了域名会自动找图标。") }
+    }
+    .confirmationDialog("从列表移除“\(removing?.name ?? "")”？", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
+      Button("从列表移除", role: .destructive) { if let p = removing { remove(p) }; removing = nil }
+      Button("取消", role: .cancel) { removing = nil }
+    } message: { Text("只会从这个列表移除，已记录的账号不受影响。") }
+    .onChange(of: store.customApps.isEmpty) { _, empty in
+      if empty && cat == "我添加的" { withAnimation(Motion.snappy) { cat = "常用" } }
+    }
+  }
+
+  func hasAccounts(_ p: Preset) -> Bool { store.data.accounts.contains { $0.name.lowercased() == p.name.lowercased() } }
+  func askRemove(_ p: Preset) {
+    if hasAccounts(p) { removing = p } else { remove(p) }
+  }
+  func remove(_ p: Preset) {
+    withAnimation(Motion.snappy) {
+      store.hideApp(p.name)
+      picked.removeAll { key($0) == key(p) }
+      if store.customApps.isEmpty && cat == "我添加的" { cat = "常用" }
+    }
   }
 
   func tile(_ p: Preset) -> some View {
     let on = picked.contains { key($0) == key(p) }
-    let has = store.data.accounts.contains { $0.name.lowercased() == p.name.lowercased() }
+    let has = hasAccounts(p)
     return Button {
       withAnimation(Motion.snappy) {
         if on { picked.removeAll { key($0) == key(p) } } else { picked.append(p) }
       }
     } label: {
       VStack(spacing: 6) {
-        AppIcon(name: p.name, domain: p.domain, size: 60)
+        AppIcon(name: p.name, domain: p.domain, icon: p.icon, size: 60)
           .overlay(alignment: .topTrailing) {
             if on {
               Image(systemName: "checkmark.circle.fill").font(.system(size: 22)).symbolRenderingMode(.palette)
@@ -513,10 +537,95 @@ struct PickerSheet: View {
               handle: (handles[key(p)] ?? "").trimmingCharacters(in: .whitespaces).isEmpty ? nil : handles[key(p)]!.trimmingCharacters(in: .whitespaces),
               createdAt: now - Double(k), icon: p.icon)
     }
+    store.unhideApps(made.map(\.name))
     store.mutate(made.count == 1 ? "已添加 \(made[0].name)" : "已添加 \(made.count) 个网站与 App") { s in
       s.accounts.append(contentsOf: made)
     }
     IconStore.shared.prefetch(made)
+    dismiss()
+  }
+}
+
+// MARK: - 手动添加: name, domain and an icon slot (photo or the default letter / favicon)
+
+struct ManualAppSheet: View {
+  @Environment(Store.self) var store
+  @Environment(\.dismiss) var dismiss
+  let onAdd: (Preset) -> Void
+  @State private var name: String
+  @State private var domain = ""
+  @State private var icon: String? = nil
+  @State private var iconMenu = false
+  @State private var photos = false
+  @State private var photoItem: PhotosPickerItem? = nil
+  @State private var iconJob = 0
+  @FocusState private var nameFocused: Bool
+
+  init(initialName: String, onAdd: @escaping (Preset) -> Void) {
+    self.onAdd = onAdd
+    _name = State(initialValue: initialName.trimmingCharacters(in: .whitespaces))
+  }
+
+  var trimmed: String { name.trimmingCharacters(in: .whitespaces) }
+
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section {
+          VStack(spacing: 10) {
+            Button { iconMenu = true } label: {
+              AppIcon(name: trimmed.isEmpty ? "?" : trimmed, domain: cleanDomain(domain), icon: icon, size: 72)
+                .overlay(alignment: .bottomTrailing) {
+                  Image(systemName: icon == nil ? "camera.fill" : "pencil").font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                    .frame(width: 24, height: 24).background(Circle().fill(Color.accentColor)).overlay(Circle().stroke(.background, lineWidth: 2))
+                    .offset(x: 6, y: 6)
+                }
+            }
+            .buttonStyle(PressStyle(scale: 0.92))
+            .accessibilityLabel("更换图标")
+            Text("点图标可以换成相册里的图片").font(.system(size: 12)).foregroundStyle(.secondary)
+          }
+          .frame(maxWidth: .infinity).padding(.vertical, 6)
+        }
+        .listRowBackground(Color.clear)
+        Section {
+          TextField("名称", text: $name).font(.system(size: 17, weight: .semibold)).focused($nameFocused)
+            .submitLabel(.done).onSubmit { add() }
+          TextField("域名（可选）", text: $domain).keyboardType(.URL).textInputAutocapitalization(.never).autocorrectionDisabled()
+        } footer: { Text("名称必填，填了域名会自动找图标。") }
+      }
+      .animation(Motion.snappy, value: icon)
+      .confirmationDialog("更换图标", isPresented: $iconMenu, titleVisibility: .visible) {
+        Button("从相册选择") { photos = true }
+        if icon != nil { Button("使用默认图标") { iconJob &+= 1; withAnimation(Motion.snappy) { icon = nil } } }
+        Button("取消", role: .cancel) {}
+      }
+      .photosPicker(isPresented: $photos, selection: $photoItem, matching: .images)
+      .onChange(of: photoItem) {
+        guard let item = photoItem else { return }
+        photoItem = nil
+        iconJob &+= 1; let job = iconJob
+        Task {
+          let u = await IconCodec.dataURL(from: item)
+          guard job == iconJob else { return }
+          if let u { withAnimation(Motion.snappy) { icon = u } } else { store.show("这张图片读不出来") }
+        }
+      }
+      .navigationTitle("手动添加").navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+        ToolbarItem(placement: .confirmationAction) { Button("添加") { add() }.bold().disabled(trimmed.isEmpty) }
+      }
+      .onAppear { if trimmed.isEmpty { nameFocused = true } }
+    }
+    .presentationDetents([.medium, .large])
+    .presentationDragIndicator(.visible)
+  }
+
+  func add() {
+    let n = trimmed; guard !n.isEmpty else { return }
+    let p = Preset(name: n, domain: cleanDomain(domain), category: presetFor(name: n, domain: domain)?.category ?? "其他", color: "", icon: icon)
+    onAdd(p)
     dismiss()
   }
 }
