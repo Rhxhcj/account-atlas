@@ -25,7 +25,17 @@
     '#00c7be': ['海湾', '#8af5d6 0%, #00c7be 44%, #0a62b0 100%'],
     '#3a3a3c': ['曜石', '#76767c 0%, #3a3a3c 46%, #0d0d10 100%'],
   };
-  const COLORS = Object.keys(SKINS);
+  const COLORS = Object.keys(SKINS).slice(0, 10);   // the palette; provider skins are added for login cards
+  // 微信 / Apple 登录卡: provider name, default key colour (with its own skin), field label and placeholder
+  const LOGIN = {
+    wechat: { name: '微信', color: '#07c160', field: '微信号', ph: 'wxid 或自定义微信号' },
+    apple: { name: 'Apple 账户', short: 'Apple', color: '#1d1d1f', field: 'Apple ID', ph: 'name@icloud.com 或手机号' },
+  };
+  SKINS['#07c160'] = ['微信绿', '#7ee8a2 0%, #07c160 46%, #05785a 100%'];
+  SKINS['#1d1d1f'] = ['石墨', '#c9ccd3 0%, #6e7079 34%, #2c2c30 68%, #111113 100%'];
+  const KINDS = ['email', 'phone', 'login'];
+  const provOf = i => i.provider === 'apple' ? 'apple' : 'wechat';
+  const typeName = i => i.type === 'login' ? LOGIN[provOf(i)].name : i.type === 'phone' ? '手机号' : '邮箱';
   const skin = c => `linear-gradient(145deg, ${SKINS[c] ? SKINS[c][1] : `color-mix(in srgb, ${c} 70%, #fff) 0%, ${c} 50%, color-mix(in srgb, ${c} 70%, #000) 100%`})`;
   const CATS = ['社交', '购物', '支付金融', '开发', 'AI', '娱乐', '游戏', '出行', '工具', '加密', '其他'];
   // name, domain, category, brand colour
@@ -97,7 +107,7 @@
 
   // ---------- state ----------
   let state = (() => { try { return JSON.parse(localStorage.getItem(KEY)); } catch { return null; } })();
-  const ui = { tab: 'home', cat: '全部', privacy: localStorage.getItem('atlas.privacy') === '1', active: 0, kind: localStorage.getItem('atlas.kind') === 'phone' ? 'phone' : 'email' };
+  const ui = { tab: 'home', cat: '全部', privacy: localStorage.getItem('atlas.privacy') === '1', active: 0, kind: KINDS.includes(localStorage.getItem('atlas.kind')) ? localStorage.getItem('atlas.kind') : 'email' };
   // every item carries updatedAt; removed ids become tombstones, so two devices can merge
   const strip = o => { const { updatedAt, ...r } = o; return JSON.stringify(r); };
   let seen = new Map();
@@ -124,7 +134,9 @@
       { id: uid(), type: 'email', value: 'dev@outlook.com', label: '开发专用', color: COLORS[4], notes: '' },
       { id: uid(), type: 'phone', value: '+86 170 0000 5678', label: '副卡', color: COLORS[2], notes: '', esim: true },
     ];
-    const [g, p1, q, o, p2] = ids.map(i => i.id);
+    ids.push({ id: uid(), type: 'login', provider: 'wechat', value: 'atlas_demo', label: '', color: LOGIN.wechat.color, notes: '', via: ids[1].id },
+      { id: uid(), type: 'login', provider: 'apple', value: 'me@icloud.com', label: '', color: LOGIN.apple.color, notes: '', via: ids[1].id });
+    const [g, p1, q, o, p2, wx, ap] = ids.map(i => i.id);
     const now = Date.now();
     const mk = (name, domain, category, identityIds, ago, notes = '') => ({ id: uid(), name, domain, category, identityIds, notes, createdAt: now - ago * DAY - Math.random() * 3e6 });
     return {
@@ -133,16 +145,16 @@
       accounts: [
         mk('GitHub', 'github.com', '开发', [o, p1], 0, '已开两步验证'), mk('Claude', 'claude.ai', 'AI', [g], 0),
         mk('Cloudflare', 'cloudflare.com', '开发', [o], 1), mk('ChatGPT', 'chatgpt.com', 'AI', [g], 1),
-        mk('小红书', 'xiaohongshu.com', '社交', [p2], 3), mk('Binance', 'binance.com', '加密', [o, p1], 3, '已完成 KYC'),
+        mk('小红书', 'xiaohongshu.com', '社交', [p2, wx], 3), mk('美团', 'meituan.com', '出行', [wx], 5), mk('拼多多', 'pinduoduo.com', '购物', [wx], 7), mk('Binance', 'binance.com', '加密', [o, p1], 3, '已完成 KYC'),
         mk('淘宝', 'taobao.com', '购物', [q, p1], 9), mk('京东', 'jd.com', '购物', [q, p2], 12),
         mk('微信', 'weixin.qq.com', '社交', [p1], 30), mk('支付宝', 'alipay.com', '支付金融', [p1], 30),
         mk('哔哩哔哩', 'bilibili.com', '娱乐', [p2], 40), mk('Steam', 'steampowered.com', '游戏', [q], 60, '令牌在主力手机上'),
-        mk('Apple ID', 'apple.com', '工具', [g, p1], 90), mk('Notion', 'notion.so', '工具', [g], 120), mk('网易云音乐', 'music.163.com', '娱乐', [p2], 150),
+        mk('Apple ID', 'apple.com', '工具', [g, p1], 90), mk('Notion', 'notion.so', '工具', [g], 120), mk('网易云音乐', 'music.163.com', '娱乐', [p2], 150), mk('Spotify', 'spotify.com', '娱乐', [ap], 20),
       ],
     };
   }
 
-  // the wallet shows one kind at a time: emails or phone numbers
+  // the wallet shows one kind at a time: emails, phone numbers, or 微信 / Apple login cards
   const deck = () => state.identities.filter(i => i.type === ui.kind);
   const cur = () => deck()[ui.active];
   function setKind(k, focusId) {
@@ -167,11 +179,16 @@
   const idById = id => state.identities.find(i => i.id === id);
   const accById = id => state.accounts.find(a => a.id === id);
   const accountsOf = id => state.accounts.filter(a => a.identityIds.includes(id)).sort((a, b) => zh(a.name, b.name));
+  // the email / phone a login card is bound to; a dangling or odd reference counts as none
+  const viaOf = i => { if (i.type !== 'login' || !i.via) return null; const v = idById(i.via); return v && (v.type === 'email' || v.type === 'phone') ? v : null; };
+  const boundTo = id => state.identities.filter(i => i.type === 'login' && i.via === id && viaOf(i));
 
   function display(i) {
     const v = i.value;
     if (!ui.privacy) return v;
-    if (i.type === 'email') { const [u, d = ''] = v.split('@'); return u.slice(0, 2) + '•••' + (d ? '@' + d : ''); }
+    if (i.type === 'email' || (i.type === 'login' && v.includes('@'))) { const [u, d = ''] = v.split('@'); return u.slice(0, 2) + '•••' + (d ? '@' + d : ''); }
+    if (i.type === 'login' && provOf(i) === 'wechat') return [...v].slice(0, 2).join('') + '•••';
+    if (i.type !== 'phone' && i.type !== 'login') return v.slice(0, 2) + '•••';
     const digits = v.replace(/\D/g, '');
     return digits.length > 7 ? '••• •••• ' + digits.slice(-4) : '••••';
   }
@@ -206,8 +223,12 @@
     open: '<svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg>',
     x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',
     check: '<svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
+    login: '<svg viewBox="0 0 24 24"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v3M21 12v2"/></svg>',
+    wechat: '<svg viewBox="0 0 24 24"><path d="M9.5 4C5.4 4 2.5 6.6 2.5 9.8c0 1.8 1 3.4 2.5 4.5l-.6 2.2 2.6-1.4c.8.2 1.6.3 2.5.3h.4"/><path d="M15.3 9.3c-3.4 0-6.1 2.3-6.1 5.1s2.7 5.1 6.1 5.1c.7 0 1.4-.1 2-.3l2.2 1.2-.5-1.9c1.5-.9 2.4-2.4 2.4-4.1 0-2.8-2.7-5.1-6.1-5.1Z"/><circle class="f" cx="7" cy="8.6" r=".9"/><circle class="f" cx="11.4" cy="8.6" r=".9"/><circle class="f" cx="13.4" cy="13.8" r=".8"/><circle class="f" cx="17.2" cy="13.8" r=".8"/></svg>',
+    apple: '<svg viewBox="0 0 24 24"><path class="f" d="M16.4 12.6c0-2.4 2-3.6 2.1-3.7-1.1-1.7-2.9-1.9-3.5-1.9-1.5-.2-2.9.9-3.7.9-.8 0-1.9-.9-3.2-.8-1.6 0-3.2 1-4 2.5-1.7 3-.4 7.4 1.2 9.8.8 1.2 1.8 2.5 3 2.4 1.2 0 1.7-.8 3.1-.8 1.5 0 1.9.8 3.2.8 1.3 0 2.1-1.2 2.9-2.4.9-1.4 1.3-2.7 1.3-2.8-.1 0-2.4-.9-2.4-4ZM14 5.3c.7-.8 1.1-1.9 1-3-.9 0-2.1.6-2.8 1.4-.6.7-1.2 1.8-1 2.9 1.1.1 2.1-.5 2.8-1.3Z"/></svg>',
   };
-  const idIcon = (i, size = '') => `<span class="icon ${size}${isESim(i) ? ' esim-ic' : ''}" style="--c:${i.color}">${isESim(i) ? 'eSIM' : ICON[i.type]}</span>`;
+  const idGlyph = i => i.type === 'login' ? ICON[provOf(i)] : ICON[i.type] || ICON.login;
+  const idIcon = (i, size = '') => `<span class="icon ${size}${isESim(i) ? ' esim-ic' : ''}" style="--c:${i.color}">${isESim(i) ? 'eSIM' : idGlyph(i)}</span>`;
   function favIcon(a, size = '') {
     const loc = customIcon(a) || localIcon(a);
     if (loc) return `<span class="icon fav full ${size}"><img alt="" loading="lazy" decoding="async" width="64" height="64" src="${loc}"></span>`;
@@ -241,7 +262,7 @@
   // 隐藏号码 also hides usernames everywhere they're shown (not in the edit form)
   const hd = h => ui.privacy ? maskHandle(h) : h;
   const handle = a => a.handle ? `<em class="hd">${esc(hd(a.handle))}</em>` : '';
-  const caps = ids => ids.map(idById).filter(Boolean).map(i => `<span class="cap" style="--c:${i.color}"><i></i>${esc(i.label || display(i))}</span>`).join('');
+  const caps = ids => ids.map(idById).filter(Boolean).map(i => `<span class="cap" style="--c:${i.color}"><i></i>${esc(i.label || (i.type === 'login' ? LOGIN[provOf(i)].short || LOGIN[provOf(i)].name : display(i)))}</span>`).join('');
 
   // ---------- toast (notification banner) ----------
   let toastTimer;
@@ -261,13 +282,18 @@
     const accs = accountsOf(i.id), n = accs.length;
     const stack = accs.slice(0, 4).map(a => favIcon(a)).join('');
     const sim = i.type === 'phone', car = sim ? carrier(i.value) : '';
-    return `<button class="wcard ${sim ? 'sim' : ''}" ${extra} data-identity="${i.id}" style="--c:${i.color};--g:${skin(i.color)}">
+    const lg = i.type === 'login', via = lg ? viaOf(i) : null;
+    const kind = lg ? `${idGlyph(i)}${esc(LOGIN[provOf(i)].name)}${i.label ? `<small class="wc-lbl">${esc(i.label)}</small>` : ''}`
+      : `${sim ? (isESim(i) ? ESIM : CHIP) : ICON.email}${esc(i.label || (sim ? '手机号' : '邮箱'))}`;
+    const note = lg ? (via ? `绑定 ${via.label || display(via)}` : i.notes || LOGIN[provOf(i)].name)
+      : sim ? [car && !(i.notes || '').includes(car.slice(2)) ? car : '', i.notes].filter(Boolean).join(' · ') || '手机号' : i.notes || '邮箱';
+    return `<button class="wcard ${sim ? 'sim' : ''}${lg ? ' login lg-' + provOf(i) : ''}" ${extra} data-identity="${i.id}" style="--c:${i.color};--g:${skin(i.color)}">
       ${poster(accs.slice().sort((a, b) => b.createdAt - a.createdAt), 9)}
       <span class="sheen"></span>
-      <span class="wc-top"><span class="wc-kind">${sim ? (isESim(i) ? ESIM : CHIP) : ICON.email}${esc(i.label || (sim ? '手机号' : '邮箱'))}</span>
+      <span class="wc-top"><span class="wc-kind">${kind}</span>
         <span class="wc-count"><b>${n}</b><small>个网站与 App</small></span></span>
       <span class="wc-value">${esc(display(i))}</span>
-      <span class="wc-foot"><span class="wc-note">${esc(sim ? [car && !(i.notes || '').includes(car.slice(2)) ? car : '', i.notes].filter(Boolean).join(' · ') || '手机号' : i.notes || '邮箱')}</span>
+      <span class="wc-foot"><span class="wc-note">${esc(note)}</span>
         <span class="stack">${n > 4 ? `<span class="more">+${n - 4}</span>` : ''}${stack}</span></span>
     </button>`;
   }
@@ -276,8 +302,8 @@
 
   // ---------- render ----------
   function renderSummary() {
-    const e = state.identities.filter(i => i.type === 'email').length, p = state.identities.length - e, a = state.accounts.length;
-    $('#summary').textContent = state.identities.length || a ? `${e} 个邮箱、${p} 个手机号，关联着 ${a} 个网站与 App` : '先添加一个邮箱或手机号';
+    const cnt = t => state.identities.filter(i => i.type === t).length, e = cnt('email'), p = cnt('phone'), l = cnt('login'), a = state.accounts.length;
+    $('#summary').textContent = state.identities.length || a ? `${e} 个邮箱、${p} 个手机号${l ? `、${l} 个登录账号` : ''}，关联着 ${a} 个网站与 App` : '先添加一个邮箱或手机号';
     $('#sitesSummary').textContent = a ? `共 ${a} 个` : '';
     document.body.classList.toggle('is-empty', !state.identities.length && !a);
     const demoBtn = $('#menu [data-act="demo"]'); if (demoBtn) demoBtn.hidden = Sync.on;
@@ -285,7 +311,7 @@
 
   function renderWallet() {
     const w = $('#wallet');
-    const d = deck(), word = ui.kind === 'email' ? '邮箱' : '手机号';
+    const d = deck(), word = { email: '邮箱', phone: '手机号', login: '微信或 Apple 账号' }[ui.kind];
     renderSeg();
     w.innerHTML = d.map(i => walletCard(i)).join('') +
       (state.identities.length ? `<button class="wcard ghost ${ui.kind === 'phone' ? 'sim' : ''}" data-new="identity" data-type="${ui.kind}"><div>${ICON.plus}添加${word}</div></button>`
@@ -304,18 +330,19 @@
   }
 
   function renderSeg() {
-    const s = $('#kindSeg'), e = state.identities.filter(i => i.type === 'email').length, p = state.identities.length - e;
+    const s = $('#kindSeg'), n = KINDS.map(t => state.identities.filter(i => i.type === t).length);
     s.hidden = !state.identities.length;
-    s.classList.toggle('right', ui.kind === 'phone');
+    s.style.setProperty('--k', KINDS.indexOf(ui.kind));
     if (s.querySelector('.thumb')) {   // update in place so the thumb slides instead of jumping
       $$('button', s).forEach(btn => btn.classList.toggle('on', btn.dataset.kind === ui.kind));
-      const bs = $$('b', s); bs[0].textContent = e; bs[1].textContent = p; return;
+      $$('b', s).forEach((b, k) => b.textContent = n[k]); return;
     }
-    s.innerHTML = `<span class="thumb"></span><button data-kind="email" class="${ui.kind === 'email' ? 'on' : ''}">${ICON.email}邮箱<b>${e}</b></button><button data-kind="phone" class="${ui.kind === 'phone' ? 'on' : ''}">${ICON.phone}手机号<b>${p}</b></button>`;
+    const names = { email: [ICON.email, '邮箱'], phone: [ICON.phone, '手机号'], login: [ICON.login, '登录'] };
+    s.innerHTML = '<span class="thumb"></span>' + KINDS.map((t, k) => `<button data-kind="${t}" class="${ui.kind === t ? 'on' : ''}">${names[t][0]}${names[t][1]}<b>${n[k]}</b></button>`).join('');
   }
   function switchKind(k) {
     if (k === ui.kind) return;
-    const w = $('#wallet'), dir = k === 'phone' ? 1 : -1;
+    const w = $('#wallet'), dir = KINDS.indexOf(k) > KINDS.indexOf(ui.kind) ? 1 : -1;
     setKind(k); renderWallet(); onActiveChange();
     const th = $('#kindSeg .thumb'); if (th && !calm()) th.animate([{ scale: '1 1' }, { scale: '1.12 .92', offset: .4 }, { scale: '1 1' }], { duration: 420, easing: 'cubic-bezier(.32,.72,0,1)' });
     // animate the cards, not the wallet: a transform on the wallet would change the cards' offsetParent
@@ -400,7 +427,7 @@
     const i = cur();
     const g = $('#grid');
     $('#gridTitle').textContent = i ? `${i.label || display(i)}` : '全部网站与 App';
-    $('#gridSub').textContent = i ? `用它注册或绑定的 ${accountsOf(i.id).length} 个网站与 App` : '';
+    $('#gridSub').textContent = i ? `${i.type === 'login' ? '用它登录的' : '用它注册或绑定的'} ${accountsOf(i.id).length} 个网站与 App` : '';
     const list = i ? accountsOf(i.id) : state.accounts.slice().sort((a, b) => zh(a.name, b.name));
     // FLIP: remember where each icon was
     const before = {}, live = ui.tab === 'home';
@@ -602,7 +629,11 @@
 
   function showIdentity(id) {
     const i = idById(id); if (!i) return;
-    const accs = accountsOf(id);
+    const accs = accountsOf(id), lg = i.type === 'login', via = viaOf(i), bound = lg ? [] : boundTo(id);
+    // sites that sign in with a 微信 / Apple card bound to this number or address
+    const direct = new Set(accs.map(a => a.id));
+    const indirect = bound.map(b => [b, accountsOf(b.id).filter(a => !direct.has(a.id))]).filter(([, l]) => l.length);
+    const idCell = (x, title) => `<button class="cell" data-identity="${x.id}">${idIcon(x)}<span class="cell-main"><span class="cell-title">${esc(title)}</span><span class="cell-sub">${esc(x.label ? x.label + ' · ' + display(x) : display(x))}</span></span>${ICON.chev}</button>`;
     openSheet(`${closeX}
       <div class="sheet-body">
         <div class="cine idcine" style="--c:${i.color};--g:${skin(i.color)}">
@@ -615,10 +646,13 @@
           <button class="action destructive" data-del-identity="${i.id}">${ICON.trash}删除</button>
         </div>
         ${i.notes ? `<div class="sec-title">备注</div><div class="notes">${esc(i.notes)}</div>` : ''}
-        <div class="sec-title">用它注册或绑定的 ${accs.length} 个网站与 App</div>
+        ${via ? `<div class="sec-title">绑定</div><div class="group">${idCell(via, `${typeName(via)} ${via.label || display(via)}`)}</div>` : ''}
+        ${bound.length ? `<div class="sec-title">绑定了这个号的登录账号</div><div class="group">${bound.map(b => idCell(b, `${LOGIN[provOf(b)].name} 绑定了这个号`)).join('')}</div>` : ''}
+        <div class="sec-title">${lg ? `用它登录的 ${accs.length} 个网站与 App` : `用它注册或绑定的 ${accs.length} 个网站与 App`}</div>
         <div class="cat-list" style="padding:0">${accs.map(a => reel(a)).join('')}
           <button class="reel" data-new="account" data-preset="${i.id}" style="color:var(--tint)"><span class="icon" style="background:rgba(255,255,255,.08);color:var(--tint)">${ICON.plus}</span><span class="reel-main"><span class="reel-title" style="font-weight:500">添加网站或 App</span></span></button>
         </div>
+        ${indirect.map(([b, l]) => `<div class="sec-title">通过${esc(LOGIN[provOf(b)].short || LOGIN[provOf(b)].name)}登录 · ${l.length} 个（间接）</div><div class="cat-list indirect" style="padding:0">${l.map(a => reel(a)).join('')}</div>`).join('')}
       </div>`, { kind: 'identity', id });
   }
 
@@ -648,50 +682,83 @@
 
   // ---------- forms ----------
   function identityForm(existing, presetType) {
-    const i = existing || { type: presetType || 'email', value: '', label: '', color: COLORS[state.identities.length % COLORS.length], notes: '' };
-    let type = i.type, color = i.color, esim = i.esim === true;
+    const startType = KINDS.includes(presetType) ? presetType : 'email';
+    const i = existing || { type: startType, value: '', label: '', color: startType === 'login' ? LOGIN.wechat.color : COLORS[state.identities.length % COLORS.length], notes: '' };
+    let type = KINDS.includes(i.type) ? i.type : 'email', color = i.color, esim = i.esim === true, provider = provOf(i), via = viaOf(i)?.id || '';
+    // a colour the user picked stays; otherwise a login card wears its provider's colour
+    let touched = !!existing && !(i.type === 'login' && i.color === LOGIN[provider].color);
+    const PH = { email: ['地址', 'name@example.com', 'email'], phone: ['号码', '+86 138 0000 0000', 'tel'] };
+    const ph = () => type === 'login' ? [LOGIN[provider].field, LOGIN[provider].ph, provider === 'apple' ? 'email' : 'text'] : PH[type];
+    const palette = () => { const p = type === 'login' ? [LOGIN.wechat.color, LOGIN.apple.color, ...COLORS] : [...COLORS]; if (!p.includes(color)) p.unshift(color); return p; };
+    const colorsHtml = () => palette().map(c => `<button class="color ${c === color ? 'active' : ''}" style="--c:${c};--g:${skin(c)}" data-c="${c}" aria-label="${SKINS[c] ? SKINS[c][0] : c}"><span>${SKINS[c] ? SKINS[c][0] : ''}</span></button>`).join('');
+    const viaHtml = () => { const opts = state.identities.filter(x => (x.type === 'email' || x.type === 'phone') && x.id !== existing?.id);
+      return `<button class="check-cell ${via ? '' : 'on'}" data-via=""><i style="background:var(--tertiary)"></i><span class="cell-main"><span class="cell-title">不绑定</span></span>${ICON.tick}</button>` +
+        opts.map(x => `<button class="check-cell ${via === x.id ? 'on' : ''}" data-via="${x.id}" style="--c:${x.color}"><i></i><span class="cell-main"><span class="cell-title">${esc(x.label || display(x))}</span><span class="cell-sub">${esc(typeName(x))}${x.label ? ' · ' + esc(display(x)) : ''}</span></span>${ICON.tick}</button>`).join(''); };
+    const [l0, p0, m0] = ph();
     openSheet(`${bar('取消', existing ? '编辑' : '新身份', existing ? '保存' : '添加', 'id="saveIdentity"')}
       <div class="sheet-body form">
         <div class="preview" id="preview"></div>
-        <div class="seg-inline ${type === 'phone' ? 'right' : ''}" id="typeSeg"><span class="thumb"></span><button data-v="email">邮箱</button><button data-v="phone">手机号</button></div>
+        <div class="seg-inline three" id="typeSeg" style="--k:${KINDS.indexOf(type)}"><span class="thumb"></span><button data-v="email">邮箱</button><button data-v="phone">手机号</button><button data-v="login">登录</button></div>
+        <div id="provBox" ${type === 'login' ? '' : 'hidden'}><div class="prov-pills" id="provPills"><button data-p="wechat" class="${provider === 'wechat' ? 'on' : ''}">${ICON.wechat}微信</button><button data-p="apple" class="${provider === 'apple' ? 'on' : ''}">${ICON.apple}Apple</button></div></div>
         <div class="group" style="margin-top:16px">
-          <div class="field" id="valueField"><label id="valueLabel">${type === 'email' ? '地址' : '号码'}</label><input id="fValue" value="${esc(i.value)}" inputmode="${type === 'email' ? 'email' : 'tel'}" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="${type === 'email' ? 'name@example.com' : '+86 138 0000 0000'}"></div>
+          <div class="field" id="valueField"><label id="valueLabel">${l0}</label><input id="fValue" value="${esc(i.value)}" inputmode="${m0}" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="${p0}"></div>
           <div class="field"><label>标签</label><input id="fLabel" value="${esc(i.label)}" placeholder="主力、小号、工作…"></div>
         </div>
         <div id="esimBox" ${type === 'phone' ? '' : 'hidden'}>
           <div class="group" style="margin-top:16px"><label class="field switch-row"><span>eSIM</span><input type="checkbox" class="switch" id="fEsim" ${esim ? 'checked' : ''}></label></div>
           <p class="hint">eSIM 没有实体卡，换手机时记得转移。</p>
         </div>
+        <div id="viaBox" ${type === 'login' ? '' : 'hidden'}>
+          <div class="sec-title">绑定的手机号/邮箱</div>
+          <div class="group" id="viaPicks">${viaHtml()}</div>
+          <p class="hint">很多 App 支持用它登录，记录在这里，换手机号时能看出受影响的网站。</p>
+        </div>
         <div class="sec-title">卡面</div>
-        <div class="group"><div class="colors" id="colors">${COLORS.map(c => `<button class="color ${c === color ? 'active' : ''}" style="--c:${c};--g:${skin(c)}" data-c="${c}" aria-label="${SKINS[c][0]}"><span>${SKINS[c][0]}</span></button>`).join('')}</div></div>
+        <div class="group"><div class="colors" id="colors">${colorsHtml()}</div></div>
         <div class="sec-title">备注</div>
         <div class="group"><div class="field stack"><textarea id="fNotes" placeholder="运营商、是否实名、找回方式">${esc(i.notes || '')}</textarea></div></div>
         <p class="hint">不要在这里填写密码。</p>
       </div>`, { kind: 'form' });
     setTimeout(() => {
       const preview = () => {
-        const tmp = { id: existing?.id || '_new', type, value: $('#fValue').value.trim() || (type === 'email' ? 'name@example.com' : '+86 138 0000 0000'), label: $('#fLabel').value.trim(), color, notes: $('#fNotes').value.trim(), ...(type === 'phone' && esim ? { esim: true } : {}) };
+        const tmp = { id: existing?.id || '_new', type, value: $('#fValue').value.trim() || ph()[1].split(' 或')[0], label: $('#fLabel').value.trim(), color, notes: $('#fNotes').value.trim(), ...(type === 'phone' && esim ? { esim: true } : {}), ...(type === 'login' ? { provider, ...(via ? { via } : {}) } : {}) };
         const html = walletCard(tmp, 'tabindex="-1" data-static');
         const box = $('#preview'); box.innerHTML = html; fixStack(box);
       };
-      preview();
+      const wireColors = () => $$('#colors .color').forEach(b => b.onclick = () => { color = b.dataset.c; touched = true; $$('#colors .color').forEach(x => x.classList.toggle('active', x === b)); preview(); });
+      const repaint = () => {
+        $('#typeSeg').style.setProperty('--k', KINDS.indexOf(type));
+        $('#esimBox').hidden = type !== 'phone'; $('#provBox').hidden = $('#viaBox').hidden = type !== 'login';
+        $$('#provPills button').forEach(b => b.classList.toggle('on', b.dataset.p === provider));
+        if (!touched) color = type === 'login' ? LOGIN[provider].color : (existing && existing.type !== 'login' ? existing.color : COLORS[state.identities.length % COLORS.length]);
+        $('#colors').innerHTML = colorsHtml(); wireColors();
+        const [lb, p, m] = ph(); $('#valueLabel').textContent = lb; const f = $('#fValue'); f.placeholder = p; f.inputMode = m;
+        preview();
+      };
+      preview(); wireColors();
       ['#fValue', '#fLabel', '#fNotes'].forEach(s => $(s).addEventListener('input', preview));
-      $$('#typeSeg button').forEach(b => b.onclick = () => {
-        type = b.dataset.v; $('#typeSeg').classList.toggle('right', type === 'phone'); $('#esimBox').hidden = type !== 'phone'; preview();
-        $('#valueLabel').textContent = type === 'email' ? '地址' : '号码';
-        const f = $('#fValue'); f.placeholder = type === 'email' ? 'name@example.com' : '+86 138 0000 0000'; f.inputMode = type === 'email' ? 'email' : 'tel';
-      });
+      $$('#typeSeg button').forEach(b => b.onclick = () => { type = b.dataset.v; repaint(); });
+      $$('#provPills button').forEach(b => b.onclick = () => { provider = b.dataset.p; repaint(); });
+      $('#viaPicks').onclick = e => { const b = e.target.closest('[data-via]'); if (!b) return; via = b.dataset.via; $$('#viaPicks .check-cell').forEach(x => x.classList.toggle('on', x === b)); preview(); };
       $('#fEsim').onchange = e => { esim = e.target.checked; preview(); };
-      $$('#colors .color').forEach(b => b.onclick = () => { color = b.dataset.c; $$('#colors .color').forEach(x => x.classList.toggle('active', x === b)); preview(); });
       $('#saveIdentity').onclick = () => {
         const value = $('#fValue').value.trim();
-        const ok = type === 'email' ? /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) : value.replace(/\D/g, '').length >= 5;
-        if (!ok) { const f = $('#valueField'); f.classList.remove('invalid'); void f.offsetWidth; f.classList.add('invalid'); $('#fValue').focus(); toast(type === 'email' ? '邮箱地址格式不对' : '手机号至少要 5 位数字'); return; }
-        if (state.identities.some(x => x.value.toLowerCase() === value.toLowerCase() && x.id !== existing?.id)) { toast('这个身份已经添加过了'); return; }
+        const isMail = v => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), digits = v => v.replace(/\D/g, '').length >= 5;
+        const ok = type === 'email' ? isMail(value) : type === 'phone' ? digits(value) : provider === 'wechat' ? value.length >= 1 : isMail(value) || digits(value);
+        if (!ok) {
+          const f = $('#valueField'); f.classList.remove('invalid'); void f.offsetWidth; f.classList.add('invalid'); $('#fValue').focus();
+          toast(type === 'email' ? '邮箱地址格式不对' : type === 'phone' ? '手机号至少要 5 位数字' : provider === 'wechat' ? '填一下微信号' : 'Apple ID 是邮箱或手机号'); return;
+        }
+        if (state.identities.some(x => x.id !== existing?.id && x.type === type && (type !== 'login' || provOf(x) === provider) && x.value.toLowerCase() === value.toLowerCase())) { toast('这个身份已经添加过了'); return; }
         const data = { type, value, label: $('#fLabel').value.trim(), color, notes: $('#fNotes').value.trim() };
         if (type === 'phone' && esim) data.esim = true;
+        if (type === 'login') { data.provider = provider; if (via && idById(via)) data.via = via; }
         let id;
-        if (existing) { Object.assign(existing, data); if (!data.esim) delete existing.esim; id = existing.id; } else { id = uid(); state.identities.push({ id, ...data }); }
+        if (existing) {
+          Object.assign(existing, data);
+          if (!data.esim) delete existing.esim; if (!data.provider) delete existing.provider; if (!data.via) delete existing.via;
+          id = existing.id;
+        } else { id = uid(); state.identities.push({ id, ...data }); }
         setKind(type, id); save(); render(); showIdentity(id); toast(existing ? '已保存' : '已添加');
       };
       if (!existing) $('#fValue').focus();
@@ -743,6 +810,15 @@
     return makeIcon(await r.blob());
   }
 
+  // 选择身份: emails and phone numbers, then 微信 / Apple in their own 第三方登录 group
+  function idPicksHtml(sel, title) {
+    const cell = i => `<button class="check-cell ${sel.has(i.id) ? 'on' : ''}" data-id="${i.id}" style="--c:${i.color}">${i.type === 'login' ? `<span class="lg-glyph lg-${provOf(i)}" style="--g:${skin(i.color)}">${idGlyph(i)}</span>` : '<i></i>'}<span class="cell-main"><span class="cell-title">${esc(i.type === 'login' ? (i.label ? `${LOGIN[provOf(i)].name} · ${i.label}` : LOGIN[provOf(i)].name) : i.label || display(i))}</span>${i.type === 'login' || i.label ? `<span class="cell-sub">${esc(display(i))}</span>` : ''}</span>${ICON.tick}</button>`;
+    const base = state.identities.filter(i => i.type === 'email' || i.type === 'phone'), lg = state.identities.filter(i => i.type === 'login');
+    return (base.length ? `<div class="sec-title">${title}</div><div class="group id-picks" id="idPicks">${base.map(cell).join('')}</div>` : '') +
+      (lg.length ? `<div class="sec-title">第三方登录</div><div class="group id-picks" id="idPicksLogin">${lg.map(cell).join('')}</div>` : '');
+  }
+  const wirePicks = sel => $$('.id-picks .check-cell').forEach(b => b.onclick = () => { const id = b.dataset.id; sel.has(id) ? sel.delete(id) : sel.add(id); b.classList.toggle('on'); });
+
   function accountForm(existing, presetId, presetName = '') {
     if (!state.identities.length) { identityForm(); toast('先添加一个邮箱或手机号'); return; }
     const a = existing || { name: presetName, domain: '', category: '其他', identityIds: presetId ? [presetId] : [], notes: '' };
@@ -759,10 +835,8 @@
           <div class="field"><label>网址</label><input id="aDomain" value="${esc(a.domain)}" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="选填，用来显示图标"></div>
         </div>
         <p class="hint dup" id="dupHint" hidden></p>
-        <div class="sec-title">用哪个邮箱或手机号注册、绑定的</div>
-        <div class="group" id="idPicks">${state.identities.map(i => `<button class="check-cell ${sel.has(i.id) ? 'on' : ''}" data-id="${i.id}" style="--c:${i.color}"><i></i><span class="cell-main"><span class="cell-title">${esc(i.label || display(i))}</span>${i.label ? `<span class="cell-sub">${esc(display(i))}</span>` : ''}</span>${ICON.tick}</button>`).join('')}</div>
-
-        <p class="hint">可以多选，比如用邮箱注册、再绑定手机号。</p>
+        ${idPicksHtml(sel, '用哪个邮箱或手机号注册、绑定的')}
+        <p class="hint">可以多选，比如用邮箱注册、再绑定手机号；用微信或 Apple 登录的，选下面的登录账号。</p>
         <div class="sec-title">分类</div>
         <div class="group"><div class="cats" id="catPicks">${CATS.map(c => `<button class="${c === cat ? 'active' : ''}" data-c="${c}">${c}</button>`).join('')}</div></div>
         <div class="sec-title">备注</div>
@@ -772,7 +846,7 @@
     setTimeout(() => {
       const setCat = c => { cat = c; $$('#catPicks button').forEach(x => x.classList.toggle('active', x.dataset.c === c)); };
       $$('#catPicks button').forEach(b => b.onclick = () => setCat(b.dataset.c));
-      $$('#idPicks .check-cell').forEach(b => b.onclick = () => { const id = b.dataset.id; sel.has(id) ? sel.delete(id) : sel.add(id); b.classList.toggle('on'); });
+      wirePicks(sel);
       const hero = () => {
         const name = $('#aName').value.trim(), dom = cleanDomain($('#aDomain').value);
         const key = name + '|' + dom + '|' + icon.length + icon.slice(-24); const h = $('#aHero'); if (h.dataset.k === key) return; h.dataset.k = key;
@@ -1006,15 +1080,14 @@
     openSheet(`<div class="sheet-bar"><button id="pkBack">返回</button><span class="t">用哪个注册的</span><button id="pkSave">添加</button></div>
       <div class="sheet-body form">
         <div class="form-hero" style="--pc:${brand(fakes[0])}"><span class="pk-stack">${fakes.slice(0, 5).map(f => favIcon(f, 'lg')).join('')}</span><b>${picks.length === 1 ? esc(picks[0][0]) : `${esc(picks[0][0])} 等 ${picks.length} 个`}</b></div>
-        <div class="sec-title">用哪个邮箱或手机号注册、绑定的</div>
-        <div class="group" id="idPicks">${state.identities.map(i => `<button class="check-cell ${sel.has(i.id) ? 'on' : ''}" data-id="${i.id}" style="--c:${i.color}"><i></i><span class="cell-main"><span class="cell-title">${esc(i.label || display(i))}</span>${i.label ? `<span class="cell-sub">${esc(display(i))}</span>` : ''}</span>${ICON.tick}</button>`).join('')}</div>
-        <p class="hint">可以多选，比如用邮箱注册、再绑定了手机号。</p>
+        ${idPicksHtml(sel, '用哪个邮箱或手机号注册、绑定的')}
+        <p class="hint">可以多选，比如用邮箱注册、再绑定了手机号；用微信或 Apple 登录的，选下面的登录账号。</p>
         <div class="sec-title">账号名</div>
         <div class="group">${picks.map((p, k) => { const n = state.accounts.filter(x => x.name.toLowerCase() === p[0].toLowerCase()).length; return `<div class="field hd-field">${favIcon(fakes[k])}<input data-hd="${k}" value="${esc(hds[k] || '')}" placeholder="${n ? `第 ${n + 1} 个${esc(p[0])}账号，填用户名区分` : `${esc(p[0])}的用户名或昵称（选填）`}" autocapitalize="off" autocorrect="off" spellcheck="false"></div>`; }).join('')}</div>
         <p class="hint">同一个网站有好几个账号时，靠它区分。</p>
       </div>`, { kind: 'form' });
     setTimeout(() => {
-      $$('#idPicks .check-cell').forEach(b => b.onclick = () => { const id = b.dataset.id; sel.has(id) ? sel.delete(id) : sel.add(id); b.classList.toggle('on'); });
+      wirePicks(sel);
       $('#pkBack').onclick = () => pickApps(presetId, q);
       $('#pkSave').onclick = () => {
         const now = Date.now(), made = picks.map((p, k) => ({ id: uid(), createdAt: now + k, name: p[0], handle: ($(`[data-hd="${k}"]`)?.value || '').trim(), domain: p[1], category: p[2], identityIds: [...sel], notes: '', ...(p[4] ? { icon: p[4] } : {}) }));
@@ -1034,10 +1107,10 @@
   // ---------- card order ----------
   function orderSheet() {
     if (!state.identities.length) return toast('还没有邮箱或手机号');
-    const kinds = [['email', '邮箱'], ['phone', '手机号']].filter(([k]) => state.identities.some(i => i.type === k));
-    if (kinds[1] && kinds[0][0] !== ui.kind) kinds.reverse();
+    const kinds = [['email', '邮箱'], ['phone', '手机号'], ['login', '登录']].filter(([k]) => state.identities.some(i => i.type === k));
+    kinds.sort((a, b) => (b[0] === ui.kind) - (a[0] === ui.kind));
     const row = i => `<div class="ord" data-oid="${i.id}">
-        <span class="ord-sw ${i.type === 'phone' ? 'sim' : ''}" style="--c:${i.color};--g:${skin(i.color)}">${isESim(i) ? '<b class="esim-t">eSIM</b>' : ICON[i.type]}</span>
+        <span class="ord-sw ${i.type === 'phone' ? 'sim' : ''}" style="--c:${i.color};--g:${skin(i.color)}">${isESim(i) ? '<b class="esim-t">eSIM</b>' : idGlyph(i)}</span>
         <span class="ord-t"><b>${esc(i.label || display(i))}</b>${i.label ? `<small>${esc(display(i))}</small>` : ''}</span>
         <button class="ord-h" aria-label="拖动排序，可用上下方向键"><svg viewBox="0 0 24 24"><path d="M5 8h14M5 12h14M5 16h14"/></svg></button>
       </div>`;
@@ -1054,7 +1127,7 @@
         const front = cur()?.id;
         const next = state.identities.map(i => ({ ...i, order: rank.get(i.id) ?? i.order }));
         const seq = a => a.map(i => i.id).join();
-        const changed = seq(state.identities.filter(i => rank.has(i.id)).sort((a, b) => a.type.localeCompare(b.type) || rank.get(a.id) - rank.get(b.id))) !== seq(['email', 'phone'].flatMap(t => state.identities.filter(i => i.type === t))) ;
+        const changed = seq(state.identities.filter(i => rank.has(i.id)).sort((a, b) => a.type.localeCompare(b.type) || rank.get(a.id) - rank.get(b.id))) !== seq(['email', 'login', 'phone'].flatMap(t => state.identities.filter(i => i.type === t))) ;
         closeSheet();
         if (!changed) return;
         snap();
@@ -1144,7 +1217,7 @@
     if (!spotItems.length) { box.innerHTML = `<div class="spot-empty">没有找到“${esc(q)}”<br><button class="btn-filled" data-quick="${esc(q)}">添加“${esc(q)}”</button></div>`; return; }
     box.innerHTML =
       (accs.length ? `<div class="sec-title">网站与 App</div>${accs.map(a => reel(a).replace(`<span class="reel-title">${esc(a.name)}`, `<span class="reel-title">${hl(a.name, q)}`)).join('')}` : '') +
-      (ids.length ? `<div class="sec-title">邮箱与手机号</div><div class="group">${ids.map(i => `<button class="cell" data-identity="${i.id}">${idIcon(i)}<span class="cell-main"><span class="cell-title">${ui.privacy ? esc(display(i)) : hl(i.value, q)}</span><span class="cell-sub">${esc(i.label || '')}${i.label ? '，' : ''}${accountsOf(i.id).length} 个网站与 App</span></span>${ICON.chev}</button>`).join('')}</div>` : '');
+      (ids.length ? `<div class="sec-title">邮箱、手机号与登录账号</div><div class="group">${ids.map(i => `<button class="cell" data-identity="${i.id}">${idIcon(i)}<span class="cell-main"><span class="cell-title">${ui.privacy ? esc(display(i)) : hl(i.value, q)}</span><span class="cell-sub">${esc(i.label || '')}${i.label ? '，' : ''}${accountsOf(i.id).length} 个网站与 App</span></span>${ICON.chev}</button>`).join('')}</div>` : '');
     markSpot();
     $$('#spotResults .reel, #spotResults .cell').forEach((el, k) => el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 300, delay: k * 20, easing: 'ease-out', fill: 'backwards' }));
   }
@@ -1211,7 +1284,7 @@
     if (d.delIdentity) {
       const i = idById(d.delIdentity), n = accountsOf(i.id).length;
       return confirmSheet(`删除 ${display(i)}？`, n ? `它会从 ${n} 个网站与 App 的记录里移除，这些网站本身会保留。` : '删除后几秒内可以撤销。', '删除', () => {
-        snap(); state.identities = state.identities.filter(x => x.id !== i.id); state.accounts.forEach(a => a.identityIds = a.identityIds.filter(x => x !== i.id)); save(); render(); undoToast('已删除');
+        snap(); state.identities = state.identities.filter(x => x.id !== i.id); state.accounts.forEach(a => a.identityIds = a.identityIds.filter(x => x !== i.id)); state.identities.forEach(x => { if (x.via === i.id) delete x.via; }); save(); render(); undoToast('已删除');
       });
     }
     if (d.delAccount) {
@@ -1270,7 +1343,8 @@
     let sel = null, running = false, drawn = false, built = '', pre = 0;
     const ROW = 54;
     function layout() {
-      const ids = [...state.identities].sort((p, q) => (p.type === 'phone') - (q.type === 'phone'));
+      const TR = t => KINDS.indexOf(t);
+      const ids = state.identities.filter(i => TR(i.type) >= 0).sort((p, q) => TR(p.type) - TR(q.type));
       const idx = id => ids.findIndex(i => i.id === id);
       const first = a => { const ks = a.identityIds.map(idx).filter(k => k >= 0); return ks.length ? Math.min(...ks) : 1e3; };
       const apps = state.accounts.slice().sort((a, b) => first(a) - first(b) || b.identityIds.length - a.identityIds.length || zh(a.name, b.name));
@@ -1278,13 +1352,14 @@
       const H = Math.max(apps.length * ROW, ids.length * 78, 120);
       // each card sits at the middle of its apps, then nudge apart so cards never overlap
       let pos = ids.map(i => { const ys = accountsOf(i.id).map(a => ay[a.id]); return { i, y: ys.length ? ys.reduce((s, v) => s + v, 0) / ys.length : H }; });
-      // emails first, then phone numbers, with a small label between the groups
-      pos.sort((p, q) => (p.i.type === 'phone') - (q.i.type === 'phone') || p.y - q.y);
+      // emails first, then phone numbers, then login cards, with a small label above each group
+      pos.sort((p, q) => TR(p.i.type) - TR(q.i.type) || p.y - q.y);
       const GAP = 78, half = 33, LBL = 30;
-      const brk = pos.findIndex(p => p.i.type === 'phone');
-      for (let k = 0; k < pos.length; k++) pos[k].y = Math.max(pos[k].y, k ? pos[k - 1].y + GAP + (k === brk ? LBL : 0) : half + (k === brk ? LBL : 0) + LBL);
+      const brk = new Set(pos.map((p, k) => k && p.i.type !== pos[k - 1].i.type ? k : -1).filter(k => k > 0));
+      const minY = []; pos.forEach((p, k) => minY[k] = k ? minY[k - 1] + GAP + (brk.has(k) ? LBL : 0) : half + LBL);
+      for (let k = 0; k < pos.length; k++) pos[k].y = Math.max(pos[k].y, minY[k]);
       const over = pos.length ? pos[pos.length - 1].y - (H - half) : 0;
-      if (over > 0) for (let k = pos.length - 1; k >= 0; k--) { pos[k].y = Math.min(pos[k].y, k === pos.length - 1 ? H - half : pos[k + 1].y - GAP - (k + 1 === brk ? LBL : 0)); pos[k].y = Math.max(pos[k].y, half + LBL + (k >= brk && brk > 0 ? GAP + LBL : 0)); }
+      if (over > 0) for (let k = pos.length - 1; k >= 0; k--) { pos[k].y = Math.min(pos[k].y, k === pos.length - 1 ? H - half : pos[k + 1].y - GAP - (brk.has(k + 1) ? LBL : 0)); pos[k].y = Math.max(pos[k].y, minY[k]); }
       // the group label can push cards past the app column, so grow the box to fit them
       const H2 = Math.max(H, pos.length ? pos[pos.length - 1].y + half : 0);
       return { apps, ay, pos, H: H2, brk };
@@ -1303,8 +1378,8 @@
       }
       box.style.height = H + 'px';
       box.innerHTML = `<svg class="threads" viewBox="0 0 ${W} ${H}" style="width:${W}px;height:${H}px" aria-hidden="true">${paths.join('')}</svg>
-        ${pos.map((p, k) => (k === 0 || k === brk) ? `<span class="mgroup" style="top:${p.y - 31 - 24}px;width:${L}px">${p.i.type === 'phone' ? ICON.phone + '手机号' : ICON.email + '邮箱'}</span>` : '').join('')}
-        ${pos.map(p => { const c = accountsOf(p.i.id).length; return `<button class="mcard" data-map-identity="${p.i.id}" style="top:${p.y - 31}px;width:${L}px;--c:${p.i.color};--g:${skin(p.i.color)}"><span class="mk">${ICON[p.i.type]}<b>${c}</b></span><span class="mv">${esc(p.i.label || display(p.i))}</span>${p.i.label ? `<span class="ms">${esc(display(p.i))}</span>` : ''}</button>`; }).join('')}
+        ${pos.map((p, k) => (k === 0 || brk.has(k)) ? `<span class="mgroup" style="top:${p.y - 31 - 24}px;width:${L}px">${p.i.type === 'phone' ? ICON.phone + '手机号' : p.i.type === 'login' ? ICON.login + '登录' : ICON.email + '邮箱'}</span>` : '').join('')}
+        ${pos.map(p => { const c = accountsOf(p.i.id).length; return `<button class="mcard" data-map-identity="${p.i.id}" style="top:${p.y - 31}px;width:${L}px;--c:${p.i.color};--g:${skin(p.i.color)}"><span class="mk">${idGlyph(p.i)}<b>${c}</b></span><span class="mv">${esc(p.i.label || display(p.i))}</span>${p.i.label ? `<span class="ms">${esc(display(p.i))}</span>` : ''}</button>`; }).join('')}
         ${apps.map(a => `<button class="mapp ${a.identityIds.length ? '' : 'loose'}" data-account="${a.id}" style="top:${ay[a.id] - ROW / 2}px;left:${R}px">${favIcon(a)}<span class="mn">${esc(a.name)}${handle(a)}</span>${a.identityIds.length > 1 ? `<span class="mdots">${a.identityIds.map(idById).filter(Boolean).map(i => `<i style="--c:${i.color}"></i>`).join('')}</span>` : ''}</button>`).join('')}`;
       built = dataVer + ':' + W;
       apply(); if (running) draw();
@@ -1566,7 +1641,7 @@
     state = demo(); save();
     setTimeout(() => toast('这是示例数据', { label: '清空', fn: () => { state = { identities: [], accounts: [] }; save(); render(); } }), 1400);
   }
-  if (!state.identities.some(i => i.type === ui.kind) && state.identities.length) ui.kind = state.identities[0].type;
+  if (!state.identities.some(i => i.type === ui.kind)) { const t = state.identities.find(i => KINDS.includes(i.type)); if (t) ui.kind = t.type; }
 
   paintTheme(); render(); Sync.init(); Sync.listeners.forEach(f => f());
   const first = cur();
