@@ -5,9 +5,53 @@ import Observation
 
 // MARK: - data (same JSON shape as the web app, so backups and sync interoperate)
 
+/// Any JSON value: fields this build doesn't know (written by a newer web/Android client) are kept
+/// as-is and written back, so a sync or backup round trip never drops them.
+indirect enum JSONValue: Codable, Hashable {
+  case null, bool(Bool), number(Double), string(String), array([JSONValue]), object([String: JSONValue])
+  init(from d: Decoder) throws {
+    let c = try d.singleValueContainer()
+    if c.decodeNil() { self = .null }
+    else if let b = try? c.decode(Bool.self) { self = .bool(b) }
+    else if let n = try? c.decode(Double.self) { self = .number(n) }
+    else if let s = try? c.decode(String.self) { self = .string(s) }
+    else if let a = try? c.decode([JSONValue].self) { self = .array(a) }
+    else { self = .object(try c.decode([String: JSONValue].self)) }
+  }
+  func encode(to e: Encoder) throws {
+    var c = e.singleValueContainer()
+    switch self {
+    case .null: try c.encodeNil()
+    case .bool(let b): try c.encode(b)
+    case .number(let n): try c.encode(n)
+    case .string(let s): try c.encode(s)
+    case .array(let a): try c.encode(a)
+    case .object(let o): try c.encode(o)
+    }
+  }
+}
+
+struct AnyKey: CodingKey {
+  var stringValue: String
+  var intValue: Int? { nil }
+  init(_ s: String) { stringValue = s }
+  init?(stringValue: String) { self.stringValue = stringValue }
+  init?(intValue: Int) { return nil }
+}
+
+/// reads every key of a JSON object that isn't in `known`
+func unknownFields(_ d: Decoder, known: Set<String>) -> [String: JSONValue] {
+  guard let c = try? d.container(keyedBy: AnyKey.self) else { return [:] }
+  var out: [String: JSONValue] = [:]
+  for k in c.allKeys where !known.contains(k.stringValue) {
+    if let v = try? c.decode(JSONValue.self, forKey: k) { out[k.stringValue] = v }
+  }
+  return out
+}
+
 struct Identity: Codable, Identifiable, Hashable {
   var id: String
-  var type: String            // "email" | "phone"
+  var type: String            // "email" | "phone" | "login"
   var value: String
   var label: String = ""
   var color: String
@@ -16,25 +60,70 @@ struct Identity: Codable, Identifiable, Hashable {
   var order: Double? = nil
   /// phone only: an eSIM (no physical card). Written only when true; the key is omitted otherwise.
   var esim: Bool? = nil
+  /// login only: "wechat" | "apple"
+  var provider: String? = nil
+  /// login only: id of the email / phone identity it is bound to. Omitted when empty; a dangling id counts as none.
+  var via: String? = nil
+  /// fields from newer clients, written back untouched
+  var extra: [String: JSONValue] = [:]
 
-  init(id: String = newID(), type: String, value: String, label: String = "", color: String, notes: String = "", esim: Bool = false) {
+  static let knownKeys: Set<String> = ["id", "type", "value", "label", "color", "notes", "updatedAt", "order", "esim", "provider", "via"]
+
+  init(id: String = newID(), type: String, value: String, label: String = "", color: String, notes: String = "", esim: Bool = false, provider: String? = nil, via: String? = nil) {
     self.id = id; self.type = type; self.value = value; self.label = label; self.color = color; self.notes = notes
     self.esim = esim ? true : nil
+    self.provider = (provider?.isEmpty ?? true) ? nil : provider
+    self.via = (via?.isEmpty ?? true) ? nil : via
   }
   init(from d: Decoder) throws {
-    let c = try d.container(keyedBy: CodingKeys.self)
-    id = try c.decode(String.self, forKey: .id)
-    type = (try? c.decode(String.self, forKey: .type)) ?? "email"
-    value = (try? c.decode(String.self, forKey: .value)) ?? ""
-    label = (try? c.decode(String.self, forKey: .label)) ?? ""
-    color = (try? c.decode(String.self, forKey: .color)) ?? "#0a84ff"
-    notes = (try? c.decode(String.self, forKey: .notes)) ?? ""
-    updatedAt = try? c.decode(Double.self, forKey: .updatedAt)
-    order = try? c.decode(Double.self, forKey: .order)
-    esim = (try? c.decode(Bool.self, forKey: .esim)) == true ? true : nil
+    let c = try d.container(keyedBy: AnyKey.self)
+    id = try c.decode(String.self, forKey: AnyKey("id"))
+    type = (try? c.decode(String.self, forKey: AnyKey("type"))) ?? "email"
+    value = (try? c.decode(String.self, forKey: AnyKey("value"))) ?? ""
+    label = (try? c.decode(String.self, forKey: AnyKey("label"))) ?? ""
+    color = (try? c.decode(String.self, forKey: AnyKey("color"))) ?? "#0a84ff"
+    notes = (try? c.decode(String.self, forKey: AnyKey("notes"))) ?? ""
+    updatedAt = try? c.decode(Double.self, forKey: AnyKey("updatedAt"))
+    order = try? c.decode(Double.self, forKey: AnyKey("order"))
+    esim = (try? c.decode(Bool.self, forKey: AnyKey("esim"))) == true ? true : nil
+    let p = try? c.decode(String.self, forKey: AnyKey("provider"))
+    provider = (p?.isEmpty ?? true) ? nil : p
+    let v = try? c.decode(String.self, forKey: AnyKey("via"))
+    via = (v?.isEmpty ?? true) ? nil : v
+    extra = unknownFields(d, known: Identity.knownKeys)
+  }
+  func encode(to e: Encoder) throws {
+    var c = e.container(keyedBy: AnyKey.self)
+    for (k, v) in extra where !Identity.knownKeys.contains(k) { try c.encode(v, forKey: AnyKey(k)) }
+    try c.encode(id, forKey: AnyKey("id"))
+    try c.encode(type, forKey: AnyKey("type"))
+    try c.encode(value, forKey: AnyKey("value"))
+    try c.encode(label, forKey: AnyKey("label"))
+    try c.encode(color, forKey: AnyKey("color"))
+    try c.encode(notes, forKey: AnyKey("notes"))
+    try c.encodeIfPresent(updatedAt, forKey: AnyKey("updatedAt"))
+    try c.encodeIfPresent(order, forKey: AnyKey("order"))
+    if esim == true { try c.encode(true, forKey: AnyKey("esim")) }
+    if let provider, !provider.isEmpty { try c.encode(provider, forKey: AnyKey("provider")) }
+    if let via, !via.isEmpty { try c.encode(via, forKey: AnyKey("via")) }
   }
   var isPhone: Bool { type == "phone" }
   var isESim: Bool { isPhone && esim == true }
+  var isLogin: Bool { type == "login" }
+  var isApple: Bool { isLogin && provider == "apple" }
+  /// 微信 / Apple 账户 (login cards), 手机号, 邮箱
+  var kindName: String { isLogin ? (isApple ? "Apple 账户" : "微信") : isPhone ? "手机号" : "邮箱" }
+}
+
+let KINDS = ["email", "phone", "login"]
+func loginDefaultColor(_ provider: String) -> String { provider == "apple" ? "#1d1d1f" : "#07c160" }
+/// 微信号: at least one character. Apple ID: an email, or a phone number (≥5 digits).
+func loginValueValid(provider: String, value: String) -> Bool {
+  let v = value.trimmingCharacters(in: .whitespaces)
+  if v.isEmpty { return false }
+  if provider != "apple" { return true }
+  if v.range(of: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", options: .regularExpression) != nil { return true }
+  return v.allSatisfy { $0.isNumber || " +-()".contains($0) } && v.filter(\.isNumber).count >= 5
 }
 
 struct Account: Codable, Identifiable, Hashable {
@@ -49,6 +138,8 @@ struct Account: Codable, Identifiable, Hashable {
   var updatedAt: Double? = nil
   /// custom / App Store icon: a data:image/png|jpeg;base64 URL (square, ≤128 px). nil = preset/favicon.
   var icon: String? = nil
+  /// fields from newer clients, written back untouched
+  var extra: [String: JSONValue] = [:]
 
   init(id: String = newID(), name: String, domain: String, category: String, identityIds: [String], notes: String = "", handle: String? = nil, createdAt: Double = nowMS(), icon: String? = nil) {
     self.id = id; self.name = name; self.domain = domain; self.category = category; self.identityIds = identityIds; self.notes = notes; self.handle = handle; self.createdAt = createdAt
@@ -68,10 +159,16 @@ struct Account: Codable, Identifiable, Hashable {
     updatedAt = try? c.decode(Double.self, forKey: .updatedAt)
     let ic = try? c.decode(String.self, forKey: .icon)
     icon = (ic?.isEmpty ?? true) ? nil : ic
+    extra = unknownFields(d, known: Set(CodingKeys.allCases.map(\.rawValue)))
   }
-  enum CodingKeys: String, CodingKey { case id, name, domain, category, identityIds, notes, handle, createdAt, updatedAt, icon }
+  enum CodingKeys: String, CodingKey, CaseIterable { case id, name, domain, category, identityIds, notes, handle, createdAt, updatedAt, icon }
   // written by hand so an empty icon is never written (old clients just see the key missing)
   func encode(to e: Encoder) throws {
+    if !extra.isEmpty {
+      let known = Set(CodingKeys.allCases.map(\.rawValue))
+      var x = e.container(keyedBy: AnyKey.self)
+      for (k, v) in extra where !known.contains(k) { try x.encode(v, forKey: AnyKey(k)) }
+    }
     var c = e.container(keyedBy: CodingKeys.self)
     try c.encode(id, forKey: .id)
     try c.encode(name, forKey: .name)
@@ -183,6 +280,8 @@ struct AtlasIndex {
   var recent: [Account] = []                     // newest 5
   var emails: [Identity] = []
   var phones: [Identity] = []
+  var logins: [Identity] = []                    // 微信 / Apple
+  var boundLogins: [String: [Identity]] = [:]    // email/phone id -> login cards bound to it
   var categoryCount: [String: Int] = [:]
   var categories: [String] = []
   var byCategory: [String: [Account]] = [:]      // sorted by name
@@ -191,7 +290,10 @@ struct AtlasIndex {
     byName = d.accounts.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     for i in d.identities {
       identityByID[i.id] = i
-      if i.type == "email" { emails.append(i) } else if i.type == "phone" { phones.append(i) }
+      if i.type == "email" { emails.append(i) } else if i.type == "phone" { phones.append(i) } else if i.type == "login" { logins.append(i) }
+    }
+    for l in logins {
+      if let v = l.via, let t = identityByID[v], t.type == "email" || t.type == "phone" { boundLogins[v, default: []].append(l) }
     }
     for a in byName {
       accountByID[a.id] = a
@@ -213,7 +315,7 @@ final class Store {
   var data = AtlasData() { didSet { index = AtlasIndex(data) } }
   private(set) var index = AtlasIndex()
   var privacy: Bool = UserDefaults.standard.bool(forKey: "atlas.privacy") { didSet { UserDefaults.standard.set(privacy, forKey: "atlas.privacy") } }
-  var kind: String = UserDefaults.standard.string(forKey: "atlas.kind") ?? "email" { didSet { UserDefaults.standard.set(kind, forKey: "atlas.kind") } }
+  var kind: String = Store.savedKind() { didSet { UserDefaults.standard.set(kind, forKey: "atlas.kind") } }
   var theme: String = UserDefaults.standard.string(forKey: "atlas.theme") ?? "dark" { didSet { UserDefaults.standard.set(theme, forKey: "atlas.theme") } }
   var activeID: String? = nil
   var route: Route? = nil
@@ -241,7 +343,25 @@ final class Store {
     IconStore.shared.prefetch(data.accounts)
   }
 
-  var deck: [Identity] { kind == "phone" ? index.phones : kind == "email" ? index.emails : data.identities.filter { $0.type == kind } }
+  static func savedKind() -> String {
+    let k = UserDefaults.standard.string(forKey: "atlas.kind") ?? "email"
+    return KINDS.contains(k) ? k : "email"
+  }
+  var deck: [Identity] {
+    switch kind {
+    case "phone": return index.phones
+    case "email": return index.emails
+    case "login": return index.logins
+    default: return data.identities.filter { $0.type == kind }
+    }
+  }
+  /// the email / phone a login card is bound to; a dangling or wrong-typed id counts as none
+  func via(_ i: Identity) -> Identity? {
+    guard i.isLogin, let v = i.via, let t = index.identityByID[v], t.type == "email" || t.type == "phone" else { return nil }
+    return t
+  }
+  /// login cards bound to this email / phone
+  func boundLogins(_ id: String) -> [Identity] { index.boundLogins[id] ?? [] }
   var active: Identity? { deck.first { $0.id == activeID } ?? (activeID == "add" ? nil : deck.first) }
   func identity(_ id: String) -> Identity? { index.identityByID[id] }
   func account(_ id: String) -> Account? { index.accountByID[id] }
@@ -249,12 +369,20 @@ final class Store {
 
   func display(_ i: Identity) -> String {
     guard privacy else { return i.value }
-    if i.type == "email" {
-      let parts = i.value.split(separator: "@", maxSplits: 1).map(String.init)
+    func mail(_ v: String) -> String {
+      let parts = v.split(separator: "@", maxSplits: 1).map(String.init)
       return String((parts.first ?? "").prefix(2)) + "•••" + (parts.count > 1 ? "@" + parts[1] : "")
     }
-    let digits = i.value.filter(\.isNumber)
-    return digits.count > 7 ? "••• •••• " + digits.suffix(4) : "••••"
+    func number(_ v: String) -> String {
+      let digits = v.filter(\.isNumber)
+      return digits.count > 7 ? "••• •••• " + digits.suffix(4) : "••••"
+    }
+    if i.type == "email" { return mail(i.value) }
+    if i.isLogin {
+      if i.isApple { return i.value.contains("@") ? mail(i.value) : number(i.value) }
+      return String(i.value.prefix(2)) + "•••"
+    }
+    return number(i.value)
   }
   func handleText(_ h: String) -> String { privacy ? String(h.prefix(1)) + "•••" : h }
   func title(_ i: Identity) -> String { i.label.isEmpty ? display(i) : i.label }
@@ -413,18 +541,22 @@ final class Store {
       Identity(type: "phone", value: "+86 170 0000 5678", label: "副卡", color: "#ff9f0a", esim: true),
     ]
     let g = ids[0].id, p1 = ids[1].id, q = ids[2].id, o = ids[3].id, p2 = ids[4].id
+    let wx = Identity(type: "login", value: "atlas_wx2024", label: "", color: loginDefaultColor("wechat"), provider: "wechat", via: p1)
+    let ap = Identity(type: "login", value: "me@icloud.com", label: "", color: loginDefaultColor("apple"), provider: "apple", via: g)
+    let w = wx.id, a = ap.id
     let day = 86_400_000.0, now = nowMS()
     func mk(_ n: String, _ d: String, _ c: String, _ i: [String], _ ago: Double, _ notes: String = "") -> Account {
       Account(name: n, domain: d, category: c, identityIds: i, notes: notes, createdAt: now - ago * day - Double.random(in: 0..<3e6))
     }
-    return AtlasData(identities: ids, accounts: [
+    return AtlasData(identities: ids + [wx, ap], accounts: [
       mk("GitHub", "github.com", "开发", [o, p1], 0, "已开两步验证"), mk("Claude", "claude.ai", "AI", [g], 0),
       mk("Cloudflare", "cloudflare.com", "开发", [o], 1), mk("ChatGPT", "chatgpt.com", "AI", [g], 1),
-      mk("小红书", "xiaohongshu.com", "社交", [p2], 3), mk("Binance", "binance.com", "加密", [o, p1], 3, "已完成 KYC"),
+      mk("小红书", "xiaohongshu.com", "社交", [p2, w], 3), mk("Binance", "binance.com", "加密", [o, p1], 3, "已完成 KYC"),
       mk("淘宝", "taobao.com", "购物", [q, p1], 9), mk("京东", "jd.com", "购物", [q, p2], 12),
       mk("微信", "weixin.qq.com", "社交", [p1], 30), mk("支付宝", "alipay.com", "支付金融", [p1], 30),
       mk("哔哩哔哩", "bilibili.com", "娱乐", [p2], 40), mk("Steam", "steampowered.com", "游戏", [q], 60, "令牌在主力手机上"),
-      mk("Apple ID", "apple.com", "工具", [g, p1], 90), mk("Notion", "notion.so", "工具", [g], 120), mk("网易云音乐", "music.163.com", "娱乐", [p2], 150),
+      mk("Apple ID", "apple.com", "工具", [g, p1], 90), mk("Notion", "notion.so", "工具", [a], 120), mk("网易云音乐", "music.163.com", "娱乐", [p2], 150),
+      mk("美团", "meituan.com", "出行", [w], 20), mk("拼多多", "pinduoduo.com", "购物", [w], 25),
     ], demo: true)
   }
 }

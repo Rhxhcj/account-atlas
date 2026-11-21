@@ -5,25 +5,59 @@ struct IdentityForm: View {
   @Environment(Store.self) var store
   @Environment(\.dismiss) var dismiss
   let existing: Identity?
+  let baseColor: String
   @State private var type: String
   @State private var value: String
   @State private var label: String
   @State private var color: String
   @State private var notes: String
   @State private var esim: Bool
+  @State private var provider: String
+  @State private var via: String
+  @State private var colorTouched = false   // the user picked a skin here: stop following the type / provider
 
   init(existing: Identity?, type: String, defaultColor: String) {
     self.existing = existing
-    _type = State(initialValue: existing?.type ?? type)
+    let t = existing?.type ?? type
+    let p = existing?.provider ?? "wechat"
+    baseColor = defaultColor
+    _type = State(initialValue: t)
     _value = State(initialValue: existing?.value ?? "")
     _label = State(initialValue: existing?.label ?? "")
-    _color = State(initialValue: existing?.color ?? defaultColor)
+    _color = State(initialValue: existing?.color ?? (t == "login" ? loginDefaultColor(p) : defaultColor))
     _notes = State(initialValue: existing?.notes ?? "")
     _esim = State(initialValue: existing?.esim == true)
+    _provider = State(initialValue: p)
+    _via = State(initialValue: existing?.via ?? "")
   }
 
+  var isLogin: Bool { type == "login" }
+  var placeholder: String {
+    switch type {
+    case "email": return "name@example.com"
+    case "phone": return "+86 138 0000 0000"
+    default: return provider == "apple" ? "name@icloud.com 或手机号" : "wxid 或自定义微信号"
+    }
+  }
+  var sample: String {
+    switch type {
+    case "email": return "name@example.com"
+    case "phone": return "+86 138 0000 0000"
+    default: return provider == "apple" ? "name@icloud.com" : "wxid_example"
+    }
+  }
+  /// emails and phones a login card can be bound to
+  var bindable: [Identity] { (store.index.emails + store.index.phones).filter { $0.id != existing?.id } }
+  var trimmed: String { value.trimmingCharacters(in: .whitespaces) }
+  var valid: Bool {
+    if trimmed.isEmpty { return false }
+    return isLogin ? loginValueValid(provider: provider, value: trimmed) : true
+  }
+  func isLoginSkin(_ c: String) -> Bool { LOGIN_SKINS.contains { $0.0 == c } }
+
   var preview: Identity {
-    var i = Identity(id: existing?.id ?? "_new", type: type, value: value.isEmpty ? (type == "email" ? "name@example.com" : "+86 138 0000 0000") : value, label: label, color: color, notes: notes, esim: type == "phone" && esim)
+    var i = Identity(id: existing?.id ?? "_new", type: type, value: value.isEmpty ? sample : value, label: label, color: color, notes: notes,
+                     esim: type == "phone" && esim, provider: isLogin ? provider : nil, via: isLogin ? via : nil)
     i.order = existing?.order
     return i
   }
@@ -39,23 +73,44 @@ struct IdentityForm: View {
           Picker("类型", selection: $type) {
             Text("邮箱").tag("email")
             Text("手机号").tag("phone")
+            Text("登录").tag("login")
           }.pickerStyle(.segmented)
         }
         .listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+        if isLogin {
+          Section {
+            HStack(spacing: 10) {
+              providerPill("wechat", "微信")
+              providerPill("apple", "Apple")
+            }
+            .listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+          }
+        }
         Section {
-          TextField(type == "email" ? "name@example.com" : "+86 138 0000 0000", text: $value)
-            .keyboardType(type == "email" ? .emailAddress : .phonePad).textInputAutocapitalization(.never).autocorrectionDisabled()
+          TextField(placeholder, text: $value)
+            .keyboardType(type == "email" || (isLogin && provider == "apple") ? .emailAddress : type == "phone" ? .phonePad : .asciiCapable)
+            .textInputAutocapitalization(.never).autocorrectionDisabled()
           TextField("标签：主力、小号、工作…", text: $label)
-        } header: { Text(type == "email" ? "地址" : "号码") }
+        } header: { Text(fieldTitle) } footer: {
+          if isLogin && provider == "apple" && !trimmed.isEmpty && !valid { Text("Apple ID 是邮箱或手机号。") }
+        }
         if type == "phone" {
           Section {
             Toggle("eSIM", isOn: $esim.animation(Motion.smooth))
           } footer: { Text("eSIM 没有实体卡，换手机时记得转移。") }
         }
+        if isLogin {
+          Section {
+            Picker("绑定的手机号/邮箱", selection: $via) {
+              Text("无").tag("")
+              ForEach(bindable) { i in Text(i.kindName + " · " + store.title(i)).tag(i.id) }
+            }
+          } footer: { Text("很多 App 支持用它登录，记录在这里，换手机号时能看出受影响的网站。") }
+        }
         Section("卡面") {
           LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 5), spacing: 12) {
-            ForEach(SKINS, id: \.0) { s in
-              Button { withAnimation(Motion.snappy) { color = s.0 } } label: {
+            ForEach(isLogin ? LOGIN_SKINS + SKINS : SKINS, id: \.0) { s in
+              Button { colorTouched = true; withAnimation(Motion.snappy) { color = s.0 } } label: {
                 VStack(spacing: 4) {
                   RoundedRectangle(cornerRadius: 8, style: .continuous).fill(skinGradient(s.0)).frame(height: 34)
                     .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.primary, lineWidth: color == s.0 ? 2.5 : 0).padding(-3))
@@ -67,7 +122,7 @@ struct IdentityForm: View {
         }
         .sensoryFeedback(.selection, trigger: color)
         Section {
-          TextField("运营商、是否实名、找回方式", text: $notes, axis: .vertical).lineLimit(2...6)
+          TextField(isLogin ? "实名情况、找回方式" : "运营商、是否实名、找回方式", text: $notes, axis: .vertical).lineLimit(2...6)
         } header: { Text("备注") } footer: { Text("不要在这里填写密码。") }
       }
       .scrollContentBackground(.hidden)
@@ -75,24 +130,66 @@ struct IdentityForm: View {
       .navigationTitle(existing == nil ? "新身份" : "编辑").navigationBarTitleDisplayMode(.inline)
       .toolbar {
         ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
-        ToolbarItem(placement: .confirmationAction) { Button(existing == nil ? "添加" : "保存") { save() }.bold().disabled(value.trimmingCharacters(in: .whitespaces).isEmpty) }
+        ToolbarItem(placement: .confirmationAction) { Button(existing == nil ? "添加" : "保存") { save() }.bold().disabled(!valid) }
+      }
+      .onAppear { if !via.isEmpty && !bindable.contains(where: { $0.id == via }) { via = "" } }
+      .onChange(of: type) { old, new in
+        if colorTouched { return }
+        withAnimation(Motion.snappy) {
+          if new == "login" && !isLoginSkin(color) { color = loginDefaultColor(provider) }
+          else if old == "login" && new != "login" && isLoginSkin(color) {
+            if let e = existing, !e.isLogin { color = e.color } else { color = baseColor }
+          }
+        }
+      }
+      .onChange(of: provider) { _, new in
+        if !colorTouched && isLoginSkin(color) { withAnimation(Motion.snappy) { color = loginDefaultColor(new) } }
       }
     }
   }
 
+  var fieldTitle: String {
+    switch type {
+    case "email": return "地址"
+    case "phone": return "号码"
+    default: return provider == "apple" ? "Apple ID" : "微信号"
+    }
+  }
+
+  func providerPill(_ p: String, _ name: String) -> some View {
+    let on = provider == p
+    return Button { withAnimation(Motion.snappy) { provider = p } } label: {
+      HStack(spacing: 6) {
+        LoginGlyph(apple: p == "apple", size: 15, filled: true)
+        Text(name).font(.system(size: 15, weight: .semibold))
+      }
+      .frame(maxWidth: .infinity).frame(height: 40)
+      .foregroundStyle(on ? Color.white : Color.primary)
+      .background(on ? AnyShapeStyle(skinGradient(loginDefaultColor(p))) : AnyShapeStyle(.glass), in: Capsule())
+    }
+    .buttonStyle(PressStyle(scale: 0.96))
+    .sensoryFeedback(.selection, trigger: on)
+  }
+
   func save() {
-    let v = value.trimmingCharacters(in: .whitespaces)
+    let v = trimmed
+    let isL = isLogin
+    let prov: String? = isL ? provider : nil
+    let bound: String? = isL && !via.isEmpty ? via : nil
     if let e = existing {
       store.mutate("已保存") { s in
         if let k = s.identities.firstIndex(where: { $0.id == e.id }) {
           s.identities[k].type = type; s.identities[k].value = v; s.identities[k].label = label.trimmingCharacters(in: .whitespaces)
           s.identities[k].color = color; s.identities[k].notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
           s.identities[k].esim = (type == "phone" && esim) ? true : nil
+          s.identities[k].provider = prov
+          s.identities[k].via = bound
         }
       }
       store.setKind(type, focus: e.id)
     } else {
-      let i = Identity(type: type, value: v, label: label.trimmingCharacters(in: .whitespaces), color: color, notes: notes.trimmingCharacters(in: .whitespacesAndNewlines), esim: type == "phone" && esim)
+      let i = Identity(type: type, value: v, label: label.trimmingCharacters(in: .whitespaces), color: color, notes: notes.trimmingCharacters(in: .whitespacesAndNewlines),
+                       esim: type == "phone" && esim, provider: prov, via: bound)
       store.mutate("已添加") { s in
         s.identities.append(i)
       }
@@ -181,6 +278,11 @@ struct AccountForm: View {
         Section("用的邮箱和手机号") {
           IdentityToggles(selected: $ids)
         }
+        if !store.index.logins.isEmpty {
+          Section {
+            IdentityToggles(selected: $ids, login: true)
+          } header: { Text("第三方登录") } footer: { Text("选上表示这个网站用它登录。") }
+        }
         Section("备注") { TextField("两步验证、找回方式…", text: $notes, axis: .vertical).lineLimit(2...6) }
       }
       .animation(Motion.snappy, value: presetHits.count + storeHits.count)
@@ -264,8 +366,9 @@ struct AccountForm: View {
 struct IdentityToggles: View {
   @Environment(Store.self) var store
   @Binding var selected: [String]
+  var login = false     // true: only 微信 / Apple cards; false: emails and phones
   var body: some View {
-    ForEach(store.data.identities) { i in
+    ForEach(login ? store.index.logins : store.data.identities.filter { !$0.isLogin }) { i in
       let on = selected.contains(i.id)
       Button {
         withAnimation(Motion.snappy) { if on { selected.removeAll { $0 == i.id } } else { selected.append(i.id) } }
@@ -510,8 +613,13 @@ struct PickerSheet: View {
         }
       } header: { Text("\(picked.count) 个网站与 App") } footer: { Text("同一个网站有几个账号，可以分别记一条，用账号名区分。点图标可以换成相册里的图片。") }
       Section("用哪个邮箱或手机号注册、绑定的") {
-        if store.data.identities.isEmpty { Text("还没有邮箱或手机号，先保存，之后再关联也行。").foregroundStyle(.secondary) }
+        if !store.data.identities.contains(where: { !$0.isLogin }) { Text("还没有邮箱或手机号，先保存，之后再关联也行。").foregroundStyle(.secondary) }
         IdentityToggles(selected: $ids)
+      }
+      if !store.index.logins.isEmpty {
+        Section {
+          IdentityToggles(selected: $ids, login: true)
+        } header: { Text("第三方登录") } footer: { Text("选上表示用它登录这个网站。") }
       }
     }
     .confirmationDialog("更换图标", isPresented: Binding(get: { iconFor != nil }, set: { if !$0 { iconFor = nil } }), titleVisibility: .visible) {

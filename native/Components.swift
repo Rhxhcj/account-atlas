@@ -27,10 +27,15 @@ let SKINS: [(String, Skin)] = [
   ("#3a3a3c", Skin(name: "曜石", stops: [("#76767c", 0), ("#3a3a3c", 0.46), ("#0d0d10", 1)])),
 ]
 let COLORS = SKINS.map(\.0)
+/// default faces of login cards: WeChat green and Apple graphite (the user can pick any skin)
+let LOGIN_SKINS: [(String, Skin)] = [
+  ("#07c160", Skin(name: "微信绿", stops: [("#6be39b", 0), ("#07c160", 0.45), ("#03704f", 1)])),
+  ("#1d1d1f", Skin(name: "石墨", stops: [("#b4b6bb", 0), ("#55575d", 0.36), ("#1d1d1f", 1)])),
+]
 
 func skinGradient(_ c: String) -> LinearGradient {
   let stops: [Gradient.Stop]
-  if let s = SKINS.first(where: { $0.0 == c })?.1 { stops = s.stops.map { Gradient.Stop(color: Color(hex: $0.0), location: $0.1) } }
+  if let s = (SKINS.first(where: { $0.0 == c }) ?? LOGIN_SKINS.first(where: { $0.0 == c }))?.1 { stops = s.stops.map { Gradient.Stop(color: Color(hex: $0.0), location: $0.1) } }
   else { let k = Color(hex: c); stops = [.init(color: k.opacity(0.7), location: 0), .init(color: k, location: 0.5), .init(color: k, location: 1)] }
   // 145deg in CSS
   return LinearGradient(stops: stops, startPoint: UnitPoint(x: 0.21, y: 0), endPoint: UnitPoint(x: 0.79, y: 1))
@@ -358,13 +363,25 @@ struct ESimBadge: View {
   }
 }
 
-/// The small glyph on mini cards: envelope, SIM card, or the word eSIM.
+/// The small glyph on mini cards: envelope, SIM card, the word eSIM, or a login provider.
 struct IdentityGlyph: View {
   let identity: Identity
   var size: CGFloat
   var body: some View {
     if identity.isESim { Text("eSIM").font(.system(size: size * 0.8, weight: .bold, design: .rounded)) }
+    else if identity.isLogin { LoginGlyph(apple: identity.isApple, size: size, filled: true) }
     else { Image(systemName: identity.isPhone ? "simcard.fill" : "envelope.fill").font(.system(size: size, weight: .semibold)) }
+  }
+}
+
+/// 微信: a plain two-bubble outline (not the official logo artwork). Apple: the SF Symbol.
+struct LoginGlyph: View {
+  let apple: Bool
+  var size: CGFloat
+  var filled = false
+  var body: some View {
+    Image(systemName: apple ? "apple.logo" : (filled ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right"))
+      .font(.system(size: size, weight: apple ? .semibold : .medium))
   }
 }
 
@@ -384,8 +401,8 @@ struct WalletCard: View {
       VStack(alignment: .leading, spacing: 0) {
         HStack(alignment: .top) {
           HStack(spacing: 8) {
-            if i.isESim { ESimBadge() } else if i.isPhone { Chip() } else { Image(systemName: "envelope").font(.system(size: 17, weight: .medium)) }
-            Text(i.label.isEmpty ? (i.isPhone ? "手机号" : "邮箱") : i.label).font(.system(size: 16, weight: .semibold))
+            if i.isESim { ESimBadge() } else if i.isPhone { Chip() } else if i.isLogin { LoginGlyph(apple: i.isApple, size: 17) } else { Image(systemName: "envelope").font(.system(size: 17, weight: .medium)) }
+            Text(cardTitle(i)).font(.system(size: 16, weight: .semibold)).lineLimit(1)
           }
           Spacer()
           VStack(alignment: .trailing, spacing: 0) {
@@ -416,7 +433,15 @@ struct WalletCard: View {
     .drawingGroup()
     .bakedShadow(shape, key: "card\(i.isPhone)\(i.color)", color: Color(hex: i.color).opacity(0.45), radius: 22, y: 14)
   }
+  func cardTitle(_ i: Identity) -> String {
+    if i.isLogin { return i.label.isEmpty ? i.kindName : i.kindName + " · " + i.label }
+    return i.label.isEmpty ? i.kindName : i.label
+  }
   func footNote(_ i: Identity) -> String {
+    if i.isLogin {
+      if let v = store.via(i) { return "绑定 " + store.title(v) }
+      return i.notes.isEmpty ? (i.isApple ? "Apple ID" : "微信号") : i.notes
+    }
     if i.isPhone {
       let c = carrier(i.value)
       let parts = [(!c.isEmpty && !i.notes.contains(String(c.dropFirst(2)))) ? c : "", i.notes].filter { !$0.isEmpty }
