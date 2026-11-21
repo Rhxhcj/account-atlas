@@ -47,6 +47,7 @@ import androidx.compose.material.icons.outlined.Contrast
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.NewReleases
 import androidx.compose.material.icons.outlined.PlaylistAdd
 import androidx.compose.material.icons.outlined.SwapVert
 import androidx.compose.material.icons.outlined.Upload
@@ -158,6 +159,13 @@ fun SettingsMain(go: (String) -> Unit) {
         if (!Sync.on) {
           Divider()
           SettingRow(Icons.Outlined.PlaylistAdd, "载入示例") { Store.loadDemo() }
+        }
+      }
+      FormGroup(footer = "在 GitHub Releases 下载，直接覆盖安装，数据不会丢失。") {
+        val ver = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() }
+        val uri = LocalUriHandler.current
+        SettingRow(Icons.Outlined.NewReleases, "下载新版本", trailing = { if (ver != null) T("当前 $ver", 14f, color = pal.secondary) }, chevron = true) {
+          runCatching { uri.openUri("https://github.com/Ckxkx/account-atlas/releases/latest") }
         }
       }
       FormGroup {

@@ -47,6 +47,15 @@ struct SettingsSheet: View {
           }
         } footer: { Text("备份是 JSON 文件，和网页版通用。") }
         Section {
+          Link(destination: URL(string: "https://github.com/Ckxkx/account-atlas/releases/latest")!) {
+            HStack {
+              Label("下载新版本", systemImage: "arrow.up.forward.app")
+              Spacer()
+              Text((Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String).map { "当前 " + $0 } ?? "").foregroundStyle(.secondary)
+            }
+          }
+        } footer: { Text("在 GitHub Releases 下载，直接覆盖安装，数据不会丢失。") }
+        Section {
           Button(role: .destructive) { askWipe = true } label: { Label("清空全部数据", systemImage: "trash") }
         }
         Section {
