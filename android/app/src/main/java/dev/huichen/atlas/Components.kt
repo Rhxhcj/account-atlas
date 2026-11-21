@@ -282,6 +282,15 @@ fun Chip() {
   }
 }
 
+/** Stands in for the gold chip on an eSIM: there is no physical card. */
+@Composable
+fun ESimBadge() {
+  Box(Modifier.size(32.dp, 22.dp).clip(RoundedCornerShape(5.dp)).background(Color.White.copy(alpha = 0.18f))
+    .border(0.8.dp, Color.White.copy(alpha = 0.55f), RoundedCornerShape(5.dp)), contentAlignment = Alignment.Center) {
+    T("eSIM", 10f, FontWeight.Bold, Color.White, lines = 1)
+  }
+}
+
 fun footNote(i: Identity): String {
   if (i.isPhone) {
     val c = carrier(i.value)
@@ -321,7 +330,7 @@ fun WalletCard(i: Identity, modifier: Modifier = Modifier, shadow: Boolean = tru
       Column(Modifier.fillMaxSize().padding(18.dp)) {
         Row(verticalAlignment = Alignment.Top) {
           Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (i.isPhone) Chip() else Icon(Icons.Outlined.Email, null, Modifier.size(20.dp), tint = Color.White)
+            if (i.isESim) ESimBadge() else if (i.isPhone) Chip() else Icon(Icons.Outlined.Email, null, Modifier.size(20.dp), tint = Color.White)
             T(i.label.ifEmpty { if (i.isPhone) "手机号" else "邮箱" }, 16f, FontWeight.SemiBold, Color.White, lines = 1)
           }
           Spacer(Modifier.weight(1f))
@@ -410,7 +419,8 @@ fun ReelRow(a: Account, meta: String? = null, onClick: () -> Unit) {
 @Composable
 fun SmallCard(i: Identity, icon: ImageVector, w: Dp, h: Dp) {
   Box(Modifier.size(w, h).clip(CardShape(i.isPhone)).drawBehindCompat { drawRect(skinBrush(i.color, size)) }, contentAlignment = Alignment.Center) {
-    Icon(icon, null, Modifier.size(h * 0.5f), tint = Color.White)
+    if (i.isESim) T("eSIM", (h.value * 0.36f), FontWeight.Bold, Color.White, lines = 1)
+    else Icon(icon, null, Modifier.size(h * 0.5f), tint = Color.White)
   }
 }
 

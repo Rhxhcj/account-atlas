@@ -175,16 +175,18 @@ fun IdentityForm(existing: Identity?, type0: String, defaultColor: String) {
   var label by remember { mutableStateOf(existing?.label ?: "") }
   var color by remember { mutableStateOf(existing?.color ?: defaultColor) }
   var notes by remember { mutableStateOf(existing?.notes ?: "") }
+  var esim by remember { mutableStateOf(existing?.esim == true) }
   val hap = haptics()
-  val preview = Identity(existing?.id ?: "_new", type, value.ifEmpty { if (type == "email") "name@example.com" else "+86 138 0000 0000" }, label, color, notes, order = existing?.order)
+  val esimOut: Boolean? = if (type == "phone" && esim) true else null
+  val preview = Identity(existing?.id ?: "_new", type, value.ifEmpty { if (type == "email") "name@example.com" else "+86 138 0000 0000" }, label, color, notes, order = existing?.order, esim = esimOut)
 
   fun save() {
     val v = value.trim()
     if (existing != null) {
-      Store.mutate("已保存") { s -> s.copy(identities = s.identities.map { if (it.id == existing.id) it.copy(type = type, value = v, label = label.trim(), color = color, notes = notes.trim()) else it }) }
+      Store.mutate("已保存") { s -> s.copy(identities = s.identities.map { if (it.id == existing.id) it.copy(type = type, value = v, label = label.trim(), color = color, notes = notes.trim(), esim = esimOut) else it }) }
       Store.setKind(type, existing.id)
     } else {
-      val i = Identity(newID(), type, v, label.trim(), color, notes.trim())
+      val i = Identity(newID(), type, v, label.trim(), color, notes.trim(), esim = esimOut)
       Store.mutate("已添加") { s -> s.copy(identities = s.identities + i) }
       Store.setKind(type, i.id)
     }
@@ -205,6 +207,13 @@ fun IdentityForm(existing: Identity?, type0: String, defaultColor: String) {
           Field(value, { value = it }, if (type == "email") "name@example.com" else "+86 138 0000 0000", if (type == "email") KeyboardType.Email else KeyboardType.Phone)
           Divider()
           Field(label, { label = it }, "标签：主力、小号、工作…")
+        }
+        if (type == "phone") FormGroup(null, "eSIM 没有实体卡，换手机时记得转移。") {
+          Row(Modifier.fillMaxWidth().press(1f) { hap(TICK); esim = !esim }.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            T("eSIM", 16f, modifier = Modifier.weight(1f))
+            androidx.compose.material3.Switch(esim, { hap(TICK); esim = it }, colors = androidx.compose.material3.SwitchDefaults.colors(
+              checkedTrackColor = hex("#34c759"), checkedThumbColor = Color.White, checkedBorderColor = Color.Transparent))
+          }
         }
         FormGroup("卡面") {
           Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

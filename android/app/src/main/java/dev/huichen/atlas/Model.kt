@@ -44,8 +44,11 @@ data class Identity(
   val notes: String = "",
   @Serializable(with = MsSerializer::class) val updatedAt: Double? = null,
   @Serializable(with = MsSerializer::class) val order: Double? = null,
+  /** Phone only: an eSIM (no physical card). Written only when true; key omitted otherwise. */
+  val esim: Boolean? = null,
 ) {
   val isPhone get() = type == "phone"
+  val isESim get() = isPhone && esim == true
 }
 
 @Serializable
@@ -81,7 +84,7 @@ val JSON = Json {
 
 fun decodeAtlas(text: String): AtlasData {
   val d = JSON.decodeFromString(AtlasData.serializer(), text)
-  return d.copy(accounts = d.accounts.map { a ->
+  return d.copy(identities = d.identities.map { if (it.esim == false) it.copy(esim = null) else it }, accounts = d.accounts.map { a ->
     var x = a
     if (x.handle != null && x.handle!!.isEmpty()) x = x.copy(handle = null)
     if (x.icon != null && x.icon!!.isBlank()) x = x.copy(icon = null)

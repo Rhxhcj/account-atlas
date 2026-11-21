@@ -10,6 +10,7 @@ struct IdentityForm: View {
   @State private var label: String
   @State private var color: String
   @State private var notes: String
+  @State private var esim: Bool
 
   init(existing: Identity?, type: String, defaultColor: String) {
     self.existing = existing
@@ -18,10 +19,11 @@ struct IdentityForm: View {
     _label = State(initialValue: existing?.label ?? "")
     _color = State(initialValue: existing?.color ?? defaultColor)
     _notes = State(initialValue: existing?.notes ?? "")
+    _esim = State(initialValue: existing?.esim == true)
   }
 
   var preview: Identity {
-    var i = Identity(id: existing?.id ?? "_new", type: type, value: value.isEmpty ? (type == "email" ? "name@example.com" : "+86 138 0000 0000") : value, label: label, color: color, notes: notes)
+    var i = Identity(id: existing?.id ?? "_new", type: type, value: value.isEmpty ? (type == "email" ? "name@example.com" : "+86 138 0000 0000") : value, label: label, color: color, notes: notes, esim: type == "phone" && esim)
     i.order = existing?.order
     return i
   }
@@ -45,6 +47,11 @@ struct IdentityForm: View {
             .keyboardType(type == "email" ? .emailAddress : .phonePad).textInputAutocapitalization(.never).autocorrectionDisabled()
           TextField("标签：主力、小号、工作…", text: $label)
         } header: { Text(type == "email" ? "地址" : "号码") }
+        if type == "phone" {
+          Section {
+            Toggle("eSIM", isOn: $esim.animation(Motion.smooth))
+          } footer: { Text("eSIM 没有实体卡，换手机时记得转移。") }
+        }
         Section("卡面") {
           LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 5), spacing: 12) {
             ForEach(SKINS, id: \.0) { s in
@@ -80,11 +87,12 @@ struct IdentityForm: View {
         if let k = s.identities.firstIndex(where: { $0.id == e.id }) {
           s.identities[k].type = type; s.identities[k].value = v; s.identities[k].label = label.trimmingCharacters(in: .whitespaces)
           s.identities[k].color = color; s.identities[k].notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+          s.identities[k].esim = (type == "phone" && esim) ? true : nil
         }
       }
       store.setKind(type, focus: e.id)
     } else {
-      let i = Identity(type: type, value: v, label: label.trimmingCharacters(in: .whitespaces), color: color, notes: notes.trimmingCharacters(in: .whitespacesAndNewlines))
+      let i = Identity(type: type, value: v, label: label.trimmingCharacters(in: .whitespaces), color: color, notes: notes.trimmingCharacters(in: .whitespacesAndNewlines), esim: type == "phone" && esim)
       store.mutate("已添加") { s in
         s.identities.append(i)
       }
@@ -263,7 +271,7 @@ struct IdentityToggles: View {
         withAnimation(Motion.snappy) { if on { selected.removeAll { $0 == i.id } } else { selected.append(i.id) } }
       } label: {
         HStack(spacing: 12) {
-          Image(systemName: i.isPhone ? "simcard.fill" : "envelope.fill").font(.system(size: 12)).foregroundStyle(.white).frame(width: 36, height: 24)
+          IdentityGlyph(identity: i, size: 12).foregroundStyle(.white).frame(width: 36, height: 24)
             .background(skinGradient(i.color), in: CardShape(sim: i.isPhone))
           VStack(alignment: .leading, spacing: 1) {
             Text(store.title(i)).foregroundStyle(.primary)

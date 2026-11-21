@@ -747,3 +747,14 @@ html[data-theme=light] .hero-edit{background:#e5e5ea}
 .pk-menu p+button{box-shadow:inset 0 .5px 0 var(--separator)}
 .pk-menu .destructive,.pk-menu .destructive svg{color:var(--red)}
 .pk-menu svg{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* eSIM: no physical chip, a quiet outlined tag in its place */
+.wcard .esim{flex:none;display:grid;place-items:center;width:34px;height:26px;border-radius:6px;font-size:10.5px;font-weight:700;letter-spacing:.02em;color:#fff;background:rgba(255,255,255,.16);box-shadow:inset 0 0 0 1px rgba(255,255,255,.55)}
+.icon.esim-ic{font-size:10px;font-weight:700;letter-spacing:.01em;color:#fff}
+.ord-sw .esim-t{font-size:10px;font-weight:700;color:#fff}
+.switch-row{justify-content:space-between;cursor:pointer}
+.switch-row span{font-size:17px}
+.switch{appearance:none;-webkit-appearance:none;flex:none;width:51px;height:31px;border-radius:999px;background:rgba(120,120,128,.32);position:relative;cursor:pointer;transition:background .2s;margin:0}
+.switch::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.25);transition:transform .25s cubic-bezier(.3,.7,.4,1)}
+.switch:checked{background:#34c759}
+.switch:checked::after{transform:translateX(20px)}

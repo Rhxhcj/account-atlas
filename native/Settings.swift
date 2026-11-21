@@ -110,7 +110,7 @@ struct OrderView: View {
       Section {
         ForEach(list) { i in
           HStack(spacing: 12) {
-            Image(systemName: i.isPhone ? "simcard.fill" : "envelope.fill").font(.system(size: 13)).foregroundStyle(.white).frame(width: 46, height: 30)
+            IdentityGlyph(identity: i, size: 13).foregroundStyle(.white).frame(width: 46, height: 30)
               .background(skinGradient(i.color), in: CardShape(sim: i.isPhone))
               .shadow(color: Color(hex: i.color).opacity(0.35), radius: 5, y: 2)
             VStack(alignment: .leading, spacing: 1) {

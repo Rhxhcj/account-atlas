@@ -14,9 +14,12 @@ struct Identity: Codable, Identifiable, Hashable {
   var notes: String = ""
   var updatedAt: Double? = nil
   var order: Double? = nil
+  /// phone only: an eSIM (no physical card). Written only when true; the key is omitted otherwise.
+  var esim: Bool? = nil
 
-  init(id: String = newID(), type: String, value: String, label: String = "", color: String, notes: String = "") {
+  init(id: String = newID(), type: String, value: String, label: String = "", color: String, notes: String = "", esim: Bool = false) {
     self.id = id; self.type = type; self.value = value; self.label = label; self.color = color; self.notes = notes
+    self.esim = esim ? true : nil
   }
   init(from d: Decoder) throws {
     let c = try d.container(keyedBy: CodingKeys.self)
@@ -28,8 +31,10 @@ struct Identity: Codable, Identifiable, Hashable {
     notes = (try? c.decode(String.self, forKey: .notes)) ?? ""
     updatedAt = try? c.decode(Double.self, forKey: .updatedAt)
     order = try? c.decode(Double.self, forKey: .order)
+    esim = (try? c.decode(Bool.self, forKey: .esim)) == true ? true : nil
   }
   var isPhone: Bool { type == "phone" }
+  var isESim: Bool { isPhone && esim == true }
 }
 
 struct Account: Codable, Identifiable, Hashable {
@@ -405,7 +410,7 @@ final class Store {
       Identity(type: "phone", value: "+86 138 0000 1234", label: "主力手机号", color: "#30d158", notes: "移动，已实名"),
       Identity(type: "email", value: "shopping.fun@qq.com", label: "购物小号", color: "#ff375f"),
       Identity(type: "email", value: "dev@outlook.com", label: "开发专用", color: "#bf5af2"),
-      Identity(type: "phone", value: "+86 170 0000 5678", label: "副卡", color: "#ff9f0a"),
+      Identity(type: "phone", value: "+86 170 0000 5678", label: "副卡", color: "#ff9f0a", esim: true),
     ]
     let g = ids[0].id, p1 = ids[1].id, q = ids[2].id, o = ids[3].id, p2 = ids[4].id
     let day = 86_400_000.0, now = nowMS()

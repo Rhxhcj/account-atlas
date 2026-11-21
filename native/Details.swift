@@ -110,7 +110,7 @@ struct AccountDetail: View {
               ForEach(list) { i in
                 Button { store.route = .identity(i.id) } label: {
                   HStack(spacing: 12) {
-                    Image(systemName: i.isPhone ? "simcard.fill" : "envelope.fill").foregroundStyle(.white).frame(width: 40, height: 28)
+                    IdentityGlyph(identity: i, size: 15).foregroundStyle(.white).frame(width: 40, height: 28)
                       .background(skinGradient(i.color), in: CardShape(sim: i.isPhone))
                     VStack(alignment: .leading, spacing: 2) {
                       Text(store.title(i)).font(.system(size: 16, weight: .semibold))

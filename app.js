@@ -122,7 +122,7 @@
       { id: uid(), type: 'phone', value: '+86 138 0000 1234', label: '主力手机号', color: COLORS[1], notes: '移动，已实名' },
       { id: uid(), type: 'email', value: 'shopping.fun@qq.com', label: '购物小号', color: COLORS[3], notes: '' },
       { id: uid(), type: 'email', value: 'dev@outlook.com', label: '开发专用', color: COLORS[4], notes: '' },
-      { id: uid(), type: 'phone', value: '+86 170 0000 5678', label: '副卡', color: COLORS[2], notes: '' },
+      { id: uid(), type: 'phone', value: '+86 170 0000 5678', label: '副卡', color: COLORS[2], notes: '', esim: true },
     ];
     const [g, p1, q, o, p2] = ids.map(i => i.id);
     const now = Date.now();
@@ -161,6 +161,9 @@
     return '';
   }
   const CHIP = '<svg class="chip" viewBox="0 0 40 30" aria-hidden="true"><rect x=".5" y=".5" width="39" height="29" rx="6"/><path d="M13 .5v9M27 .5v9M13 20.5v9M27 20.5v9M.5 10h12.5c2 0 2 10 0 10H.5M39.5 10H27c-2 0-2 10 0 10h12.5M13 15h14"/></svg>';
+  // an eSIM has no physical card: a quiet outlined tag stands in for the gold chip
+  const ESIM = '<span class="esim" aria-label="eSIM">eSIM</span>';
+  const isESim = i => i.type === 'phone' && i.esim === true;
   const idById = id => state.identities.find(i => i.id === id);
   const accById = id => state.accounts.find(a => a.id === id);
   const accountsOf = id => state.accounts.filter(a => a.identityIds.includes(id)).sort((a, b) => zh(a.name, b.name));
@@ -204,7 +207,7 @@
     x: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>',
     check: '<svg viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
   };
-  const idIcon = (i, size = '') => `<span class="icon ${size}" style="--c:${i.color}">${ICON[i.type]}</span>`;
+  const idIcon = (i, size = '') => `<span class="icon ${size}${isESim(i) ? ' esim-ic' : ''}" style="--c:${i.color}">${isESim(i) ? 'eSIM' : ICON[i.type]}</span>`;
   function favIcon(a, size = '') {
     const loc = customIcon(a) || localIcon(a);
     if (loc) return `<span class="icon fav full ${size}"><img alt="" loading="lazy" decoding="async" width="64" height="64" src="${loc}"></span>`;
@@ -261,7 +264,7 @@
     return `<button class="wcard ${sim ? 'sim' : ''}" ${extra} data-identity="${i.id}" style="--c:${i.color};--g:${skin(i.color)}">
       ${poster(accs.slice().sort((a, b) => b.createdAt - a.createdAt), 9)}
       <span class="sheen"></span>
-      <span class="wc-top"><span class="wc-kind">${sim ? CHIP : ICON.email}${esc(i.label || (sim ? '手机号' : '邮箱'))}</span>
+      <span class="wc-top"><span class="wc-kind">${sim ? (isESim(i) ? ESIM : CHIP) : ICON.email}${esc(i.label || (sim ? '手机号' : '邮箱'))}</span>
         <span class="wc-count"><b>${n}</b><small>个网站与 App</small></span></span>
       <span class="wc-value">${esc(display(i))}</span>
       <span class="wc-foot"><span class="wc-note">${esc(sim ? [car && !(i.notes || '').includes(car.slice(2)) ? car : '', i.notes].filter(Boolean).join(' · ') || '手机号' : i.notes || '邮箱')}</span>
@@ -646,7 +649,7 @@
   // ---------- forms ----------
   function identityForm(existing, presetType) {
     const i = existing || { type: presetType || 'email', value: '', label: '', color: COLORS[state.identities.length % COLORS.length], notes: '' };
-    let type = i.type, color = i.color;
+    let type = i.type, color = i.color, esim = i.esim === true;
     openSheet(`${bar('取消', existing ? '编辑' : '新身份', existing ? '保存' : '添加', 'id="saveIdentity"')}
       <div class="sheet-body form">
         <div class="preview" id="preview"></div>
@@ -654,6 +657,10 @@
         <div class="group" style="margin-top:16px">
           <div class="field" id="valueField"><label id="valueLabel">${type === 'email' ? '地址' : '号码'}</label><input id="fValue" value="${esc(i.value)}" inputmode="${type === 'email' ? 'email' : 'tel'}" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="${type === 'email' ? 'name@example.com' : '+86 138 0000 0000'}"></div>
           <div class="field"><label>标签</label><input id="fLabel" value="${esc(i.label)}" placeholder="主力、小号、工作…"></div>
+        </div>
+        <div id="esimBox" ${type === 'phone' ? '' : 'hidden'}>
+          <div class="group" style="margin-top:16px"><label class="field switch-row"><span>eSIM</span><input type="checkbox" class="switch" id="fEsim" ${esim ? 'checked' : ''}></label></div>
+          <p class="hint">eSIM 没有实体卡，换手机时记得转移。</p>
         </div>
         <div class="sec-title">卡面</div>
         <div class="group"><div class="colors" id="colors">${COLORS.map(c => `<button class="color ${c === color ? 'active' : ''}" style="--c:${c};--g:${skin(c)}" data-c="${c}" aria-label="${SKINS[c][0]}"><span>${SKINS[c][0]}</span></button>`).join('')}</div></div>
@@ -663,17 +670,18 @@
       </div>`, { kind: 'form' });
     setTimeout(() => {
       const preview = () => {
-        const tmp = { id: existing?.id || '_new', type, value: $('#fValue').value.trim() || (type === 'email' ? 'name@example.com' : '+86 138 0000 0000'), label: $('#fLabel').value.trim(), color, notes: $('#fNotes').value.trim() };
+        const tmp = { id: existing?.id || '_new', type, value: $('#fValue').value.trim() || (type === 'email' ? 'name@example.com' : '+86 138 0000 0000'), label: $('#fLabel').value.trim(), color, notes: $('#fNotes').value.trim(), ...(type === 'phone' && esim ? { esim: true } : {}) };
         const html = walletCard(tmp, 'tabindex="-1" data-static');
         const box = $('#preview'); box.innerHTML = html; fixStack(box);
       };
       preview();
       ['#fValue', '#fLabel', '#fNotes'].forEach(s => $(s).addEventListener('input', preview));
       $$('#typeSeg button').forEach(b => b.onclick = () => {
-        type = b.dataset.v; $('#typeSeg').classList.toggle('right', type === 'phone'); preview();
+        type = b.dataset.v; $('#typeSeg').classList.toggle('right', type === 'phone'); $('#esimBox').hidden = type !== 'phone'; preview();
         $('#valueLabel').textContent = type === 'email' ? '地址' : '号码';
         const f = $('#fValue'); f.placeholder = type === 'email' ? 'name@example.com' : '+86 138 0000 0000'; f.inputMode = type === 'email' ? 'email' : 'tel';
       });
+      $('#fEsim').onchange = e => { esim = e.target.checked; preview(); };
       $$('#colors .color').forEach(b => b.onclick = () => { color = b.dataset.c; $$('#colors .color').forEach(x => x.classList.toggle('active', x === b)); preview(); });
       $('#saveIdentity').onclick = () => {
         const value = $('#fValue').value.trim();
@@ -681,8 +689,9 @@
         if (!ok) { const f = $('#valueField'); f.classList.remove('invalid'); void f.offsetWidth; f.classList.add('invalid'); $('#fValue').focus(); toast(type === 'email' ? '邮箱地址格式不对' : '手机号至少要 5 位数字'); return; }
         if (state.identities.some(x => x.value.toLowerCase() === value.toLowerCase() && x.id !== existing?.id)) { toast('这个身份已经添加过了'); return; }
         const data = { type, value, label: $('#fLabel').value.trim(), color, notes: $('#fNotes').value.trim() };
+        if (type === 'phone' && esim) data.esim = true;
         let id;
-        if (existing) { Object.assign(existing, data); id = existing.id; } else { id = uid(); state.identities.push({ id, ...data }); }
+        if (existing) { Object.assign(existing, data); if (!data.esim) delete existing.esim; id = existing.id; } else { id = uid(); state.identities.push({ id, ...data }); }
         setKind(type, id); save(); render(); showIdentity(id); toast(existing ? '已保存' : '已添加');
       };
       if (!existing) $('#fValue').focus();
@@ -1028,7 +1037,7 @@
     const kinds = [['email', '邮箱'], ['phone', '手机号']].filter(([k]) => state.identities.some(i => i.type === k));
     if (kinds[1] && kinds[0][0] !== ui.kind) kinds.reverse();
     const row = i => `<div class="ord" data-oid="${i.id}">
-        <span class="ord-sw ${i.type === 'phone' ? 'sim' : ''}" style="--c:${i.color};--g:${skin(i.color)}">${ICON[i.type]}</span>
+        <span class="ord-sw ${i.type === 'phone' ? 'sim' : ''}" style="--c:${i.color};--g:${skin(i.color)}">${isESim(i) ? '<b class="esim-t">eSIM</b>' : ICON[i.type]}</span>
         <span class="ord-t"><b>${esc(i.label || display(i))}</b>${i.label ? `<small>${esc(display(i))}</small>` : ''}</span>
         <button class="ord-h" aria-label="拖动排序，可用上下方向键"><svg viewBox="0 0 24 24"><path d="M5 8h14M5 12h14M5 16h14"/></svg></button>
       </div>`;

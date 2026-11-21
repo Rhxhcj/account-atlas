@@ -120,7 +120,7 @@ struct MapView: View {
     let shape = CardShape(sim: i.isPhone)
     return VStack(alignment: .leading, spacing: 2) {
       HStack(spacing: 5) {
-        Image(systemName: i.isPhone ? "simcard.fill" : "envelope.fill").font(.system(size: 11, weight: .semibold))
+        IdentityGlyph(identity: i, size: 11)
         Text("\(n)").font(.system(size: 13, weight: .bold, design: .rounded))
       }.opacity(0.85)
       Text(store.title(i)).font(.system(size: 14, weight: .semibold)).lineLimit(1)

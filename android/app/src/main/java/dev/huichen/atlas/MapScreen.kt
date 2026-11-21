@@ -142,7 +142,8 @@ fun MiniCard(i: Identity, w: Dp, h: Dp) {
   Column(Modifier.size(w, h).shadow(10.dp, CardShape(i.isPhone), ambientColor = c, spotColor = c).skin(i.color, CardShape(i.isPhone)).padding(horizontal = 11.dp),
     verticalArrangement = Arrangement.Center) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.graphicsLayer { alpha = 0.85f }) {
-      Icon(if (i.isPhone) Icons.Filled.SimCard else Icons.Filled.Email, null, Modifier.size(12.dp), tint = Color.White)
+      if (i.isESim) T("eSIM", 9f, FontWeight.Bold, Color.White, lines = 1)
+      else Icon(if (i.isPhone) Icons.Filled.SimCard else Icons.Filled.Email, null, Modifier.size(12.dp), tint = Color.White)
       Spacer(Modifier.width(5.dp)); T("$n", 13f, FontWeight.Bold, Color.White)
     }
     T(Store.title(i), 14f, FontWeight.SemiBold, Color.White, lines = 1)

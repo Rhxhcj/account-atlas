@@ -348,6 +348,26 @@ struct Chip: View {
   }
 }
 
+/// Stands in for the gold chip on an eSIM: there is no physical card.
+struct ESimBadge: View {
+  var body: some View {
+    Text("eSIM").font(.system(size: 10, weight: .bold, design: .rounded))
+      .frame(width: 32, height: 22)
+      .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+      .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).stroke(.white.opacity(0.55), lineWidth: 0.8))
+  }
+}
+
+/// The small glyph on mini cards: envelope, SIM card, or the word eSIM.
+struct IdentityGlyph: View {
+  let identity: Identity
+  var size: CGFloat
+  var body: some View {
+    if identity.isESim { Text("eSIM").font(.system(size: size * 0.8, weight: .bold, design: .rounded)) }
+    else { Image(systemName: identity.isPhone ? "simcard.fill" : "envelope.fill").font(.system(size: size, weight: .semibold)) }
+  }
+}
+
 struct WalletCard: View {
   @Environment(Store.self) var store
   let identity: Identity
@@ -364,7 +384,7 @@ struct WalletCard: View {
       VStack(alignment: .leading, spacing: 0) {
         HStack(alignment: .top) {
           HStack(spacing: 8) {
-            if i.isPhone { Chip() } else { Image(systemName: "envelope").font(.system(size: 17, weight: .medium)) }
+            if i.isESim { ESimBadge() } else if i.isPhone { Chip() } else { Image(systemName: "envelope").font(.system(size: 17, weight: .medium)) }
             Text(i.label.isEmpty ? (i.isPhone ? "手机号" : "邮箱") : i.label).font(.system(size: 16, weight: .semibold))
           }
           Spacer()

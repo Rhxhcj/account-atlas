@@ -212,7 +212,7 @@ object Store {
       Identity(newID(), "phone", "+86 138 0000 1234", "主力手机号", "#30d158", "移动，已实名"),
       Identity(newID(), "email", "shopping.fun@qq.com", "购物小号", "#ff375f"),
       Identity(newID(), "email", "dev@outlook.com", "开发专用", "#bf5af2"),
-      Identity(newID(), "phone", "+86 170 0000 5678", "副卡", "#ff9f0a"),
+      Identity(newID(), "phone", "+86 170 0000 5678", "副卡", "#ff9f0a", esim = true),
     )
     val g = ids[0].id; val p1 = ids[1].id; val q = ids[2].id; val o = ids[3].id; val p2 = ids[4].id
     val day = 86_400_000.0; val now = nowMS()
