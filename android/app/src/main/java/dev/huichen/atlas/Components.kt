@@ -11,6 +11,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -158,13 +159,17 @@ fun squircle(size: Dp) = RoundedCornerShape(size * 0.235f)
 
 /** Press feedback that feels like a card being pushed. */
 @Composable
-fun Modifier.press(scale: Float = 0.96f, haptic: Boolean = false, enabled: Boolean = true, onClick: () -> Unit): Modifier {
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+fun Modifier.press(scale: Float = 0.96f, haptic: Boolean = false, enabled: Boolean = true, onLongClick: (() -> Unit)? = null, onClick: () -> Unit): Modifier {
   val src = remember { MutableInteractionSource() }
   val pressed by src.collectIsPressedAsState()
   val s by animateFloatAsState(if (pressed) scale else 1f, calm(Spring.StiffnessMedium), label = "press")
   val view = LocalView.current
-  return this.graphicsLayer { scaleX = s; scaleY = s }
-    .clickable(src, null, enabled = enabled) { if (haptic) view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); onClick() }
+  val m = this.graphicsLayer { scaleX = s; scaleY = s }
+  return if (onLongClick == null) m.clickable(src, null, enabled = enabled) { if (haptic) view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); onClick() }
+  else m.combinedClickable(src, null, enabled = enabled, onLongClick = onLongClick) {
+    if (haptic) view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY); onClick()
+  }
 }
 
 @Composable fun haptics(): (Int) -> Unit { val v = LocalView.current; return { v.performHapticFeedback(it) } }

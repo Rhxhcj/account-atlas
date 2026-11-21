@@ -3,6 +3,7 @@ package dev.huichen.atlas
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
@@ -141,27 +142,44 @@ object Store {
     activeID = focus ?: deck.firstOrNull()?.id ?: "add"
   }
 
-  // apps the user typed in by hand come back in the picker
+  // apps the user typed in by hand come back in the picker. Local only, not synced.
+  /** bumped when the local lists change, so the picker recomposes (prefs are not observable) */
+  var customRev by mutableIntStateOf(0); private set
   private fun savedCustom(): List<List<String>> = runCatching {
     JSON.decodeFromString<List<List<String>>>(prefs.getString("atlas.custom", "[]") ?: "[]")
   }.getOrDefault(emptyList())
-  val customApps: List<Preset> get() {
-    val out = ArrayList<Preset>(); val seenN = HashSet<String>()
-    val all = savedCustom() + data.accounts.reversed().map { listOf(it.name, it.domain, it.category) }
-    for (t in all) {
-      if (t.isEmpty()) continue
-      val k = t[0].lowercase()
-      if (k.isEmpty() || k in seenN || Presets.all.any { it.name.lowercase() == k }) continue
-      seenN += k
-      out += Preset(t[0], t.getOrElse(1) { "" }, t.getOrElse(2) { "其他" }, "")
-    }
-    return out
+  private fun hiddenApps(): Set<String> = runCatching {
+    JSON.decodeFromString<List<String>>(prefs.getString("atlas.custom.hidden", "[]") ?: "[]").toSet()
+  }.getOrDefault(emptySet())
+  private fun putHidden(h: Collection<String>) { prefs.edit().putString("atlas.custom.hidden", JSON.encodeToString(h.toList())).apply() }
+  private fun isPreset(n: String) = Presets.all.any { it.name.lowercase() == n.lowercase() }
+
+  val customAppList: List<CustomApp> get() {
+    customRev
+    return mergeCustomApps(savedCustom(), data.accounts, hiddenApps(), ::isPreset)
   }
-  fun rememberApp(p: Preset) {
-    if (Presets.all.any { it.name.lowercase() == p.name.lowercase() }) return
+  val customApps: List<Preset> get() = customAppList.map { it.preset }
+
+  /** Remember a hand-added app (with its own icon, if one was chosen); adding it again un-hides it. */
+  fun rememberApp(p: Preset, icon: String? = null) {
+    unhideApps(listOf(p.name))
+    if (isPreset(p.name)) return
     val saved = savedCustom().filter { it.firstOrNull()?.lowercase() != p.name.lowercase() }.toMutableList()
-    saved.add(0, listOf(p.name, p.domain, p.category))
+    saved.add(0, if (icon.isNullOrEmpty()) listOf(p.name, p.domain, p.category) else listOf(p.name, p.domain, p.category, "", icon))
     prefs.edit().putString("atlas.custom", JSON.encodeToString(saved.take(80))).apply()
+    customRev++
+  }
+  fun unhideApps(names: List<String>) {
+    val h = hiddenApps(); val keys = names.map { it.trim().lowercase() }.toSet()
+    if (h.any { it in keys }) { putHidden(h - keys); customRev++ }
+  }
+  /** "从列表移除": drop it from the saved list and hide it, accounts stay as they are. */
+  fun removeApp(name: String) {
+    val k = name.trim().lowercase()
+    val saved = savedCustom().filter { it.firstOrNull()?.trim()?.lowercase() != k }
+    prefs.edit().putString("atlas.custom", JSON.encodeToString(saved)).apply()
+    putHidden(hiddenApps() + k)
+    customRev++
   }
 
   fun backupJSON(): String {

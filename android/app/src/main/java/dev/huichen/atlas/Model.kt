@@ -102,6 +102,25 @@ val CATS = listOf("社交", "购物", "支付金融", "开发", "AI", "娱乐", 
 
 data class Preset(val name: String, val domain: String, val category: String, val color: String)
 
+/** An app the user added by hand (or has an account for) and its own icon, if any. */
+data class CustomApp(val preset: Preset, val icon: String?)
+
+/**
+ * The picker's "我添加的" list: the saved hand-added apps (atlas.custom rows [name, domain, category, color, icon]),
+ * then apps that have accounts, newest first. Presets and names the user removed (atlas.custom.hidden) are left out.
+ */
+fun mergeCustomApps(saved: List<List<String>>, accounts: List<Account>, hidden: Set<String>, isPreset: (String) -> Boolean): List<CustomApp> {
+  val out = ArrayList<CustomApp>(); val seen = HashSet<String>()
+  val rows = saved.map { it to it.getOrNull(4) } + accounts.reversed().map { listOf(it.name, it.domain, it.category) to it.icon }
+  for ((t, icon) in rows) {
+    val n = t.getOrNull(0)?.trim().orEmpty(); val k = n.lowercase()
+    if (k.isEmpty() || k in seen || k in hidden || isPreset(n)) continue
+    seen += k
+    out += CustomApp(Preset(n, t.getOrElse(1) { "" }, t.getOrNull(2)?.ifEmpty { null } ?: "其他", ""), icon?.takeIf { it.startsWith("data:image") })
+  }
+  return out
+}
+
 fun cleanDomain(d: String): String {
   var s = d.trim().lowercase()
   for (p in listOf("https://", "http://")) if (s.startsWith(p)) s = s.removePrefix(p)

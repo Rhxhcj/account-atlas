@@ -50,6 +50,8 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material.icons.filled.SimCard
 import androidx.compose.material.icons.outlined.Circle
 import androidx.compose.material3.AlertDialog
@@ -367,6 +369,14 @@ fun AccountForm(existing: Account) {
 
 // MARK: - add apps: pick sites, then pick which email / phone each uses
 
+/** "更换图标" badge over an icon: tap opens 从相册选择 / 使用默认图标. */
+@Composable
+private fun IconBadge(modifier: Modifier = Modifier) {
+  Box(modifier.size(22.dp).clip(CircleShape).background(pal.accent).border(2.dp, if (pal.dark) hex("#2c2c2e") else Color.White, CircleShape), contentAlignment = Alignment.Center) {
+    Icon(Icons.Filled.PhotoCamera, null, Modifier.size(12.dp), tint = Color.White)
+  }
+}
+
 @Composable
 fun PickerSheet(presetIdentity: String?) {
   var query by remember { mutableStateOf("") }
@@ -378,35 +388,59 @@ fun PickerSheet(presetIdentity: String?) {
   var manual by remember { mutableStateOf(false) }
   val hap = haptics()
   fun key(p: Preset) = p.name.lowercase()
-  val custom = Store.customApps
+  val customList = Store.customAppList
+  val custom = customList.map { it.preset }
+  val customIcons = customList.mapNotNull { c -> c.icon?.let { c.preset.name.lowercase() to it } }.toMap()
   // App Store results for the search box, and the icons of the ones picked
   var hits by remember { mutableStateOf(listOf<AppHit>()) }
   val hitOf = remember { mutableStateMapOf<String, AppHit>() }
   val icons = remember { mutableStateMapOf<String, String>() }
+  // icons the user chose on the handles step ("" = 使用默认图标)
+  val photos = remember { mutableStateMapOf<String, String>() }
+  var menuFor by remember { mutableStateOf<String?>(null) }      // long-pressed tile in 我添加的
+  var confirmRemove by remember { mutableStateOf<Preset?>(null) }
+  var iconMenuFor by remember { mutableStateOf<String?>(null) }  // handles step: 更换图标 menu
+  var photoFor by remember { mutableStateOf<String?>(null) }
   val scope = rememberCoroutineScope()
+  val ctx = androidx.compose.ui.platform.LocalContext.current
   val accIcons = remember(Store.data.accounts) { Store.data.accounts.filter { it.icon != null }.associateBy { it.name.lowercase() } }
-  fun ownIcon(p: Preset): Account? = if (Presets.all.any { key(it) == key(p) }) null else accIcons[key(p)]
+  fun ownIcon(p: Preset): String? = if (Presets.all.any { key(it) == key(p) }) null else accIcons[key(p)]?.icon ?: customIcons[key(p)]
+  fun has(p: Preset) = Store.data.accounts.any { it.name.lowercase() == key(p) }
   LaunchedEffect(query.trim()) {
     val q = query.trim()
     if (q.isEmpty()) { hits = emptyList(); return@LaunchedEffect }
     delay(350)
     hits = AppStore.search(q)
   }
+  // 我添加的 emptied: the tab goes away, back to 常用
+  LaunchedEffect(custom.isEmpty()) { if (custom.isEmpty() && cat == "我添加的") cat = "常用" }
+  val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+    val k = photoFor; photoFor = null
+    if (uri != null && k != null) scope.launch { CustomIcon.fromUri(ctx, uri)?.let { photos[k] = it; hap(TICK) } }
+  }
   @Composable fun PickedIcon(p: Preset, size: androidx.compose.ui.unit.Dp) {
-    val k = key(p); val h = hitOf[k]; val own = ownIcon(p)
-    if (icons[k] == null && h != null) HitThumb(h, size)
-    else AppIcon(p.name, p.domain, size, icon = icons[k] ?: own?.icon, iconKey = if (icons[k] != null) "pick-$k" else own?.id ?: "")
+    val k = key(p); val h = hitOf[k]; val ph = photos[k]
+    if (ph != null) AppIcon(p.name, p.domain, size, icon = ph.ifEmpty { null }, iconKey = "photo-$k")
+    else if (icons[k] == null && h != null) HitThumb(h, size)
+    else AppIcon(p.name, p.domain, size, icon = icons[k] ?: ownIcon(p), iconKey = if (icons[k] != null) "pick-$k" else "own-$k")
+  }
+  fun removeCustom(p: Preset) {
+    hap(CONFIRM)
+    picked.removeAll { key(it) == key(p) }
+    Store.removeApp(p.name)
   }
 
   fun save() {
     val now = nowMS()
     val made = picked.mapIndexed { k, p ->
+      val ph = photos[key(p)]
       Account(newID(), p.name, p.domain, p.category, ids, handle = handles[key(p)]?.trim()?.ifEmpty { null }, createdAt = now - k,
-        icon = icons[key(p)] ?: ownIcon(p)?.icon)
+        icon = if (ph != null) ph.ifEmpty { null } else icons[key(p)] ?: ownIcon(p))
     }
+    Store.unhideApps(made.map { it.name })
     Store.mutate(if (made.size == 1) "已添加 ${made[0].name}" else "已添加 ${made.size} 个网站与 App") { s -> s.copy(accounts = s.accounts + made) }
     // App Store icons still downloading: attach them when they arrive
-    made.filter { it.icon == null }.forEach { a ->
+    made.filter { it.icon == null && photos[it.name.lowercase()] == null }.forEach { a ->
       val h = hitOf[a.name.lowercase()] ?: return@forEach
       Store.scope.launch {
         val ic = AppStore.icon(h) ?: return@launch
@@ -424,9 +458,11 @@ fun PickerSheet(presetIdentity: String?) {
       val cats = (if (custom.isEmpty()) emptyList() else listOf("我添加的")) + "常用" + CATS.filter { c -> Presets.all.any { it.category == c } }
       val q = query.trim().lowercase()
       val all = custom + Presets.all
+      val mine = q.isEmpty() && cat == "我添加的"
       val list = if (q.isNotEmpty()) all.filter { it.name.lowercase().contains(q) || it.domain.contains(q) } else when (cat) {
         "我添加的" -> custom
-        "常用" -> custom.take(4) + Presets.popular.mapNotNull { n -> Presets.all.firstOrNull { it.name == n } }
+        // the first 12 most-used apps (3 rows of 4), custom apps only under 我添加的
+        "常用" -> Presets.popular.take(12).mapNotNull { n -> Presets.all.firstOrNull { it.name == n } }
         else -> Presets.all.filter { it.category == cat }
       }
       Box(Modifier.fillMaxSize()) {
@@ -437,19 +473,29 @@ fun PickerSheet(presetIdentity: String?) {
           LazyVerticalGrid(GridCells.Fixed(4), Modifier.weight(1f).imePadding(), contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp, 14.dp, 12.dp, 110.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             items(list, key = { "t-" + key(it) }) { p ->
-              val on = picked.any { key(it) == key(p) }
-              val has = Store.data.accounts.any { it.name.lowercase() == p.name.lowercase() }
+              val k = key(p)
+              val on = picked.any { key(it) == k }
+              val recorded = has(p)
               val sc by animateFloatAsState(if (on) 0.92f else 1f, calm(), label = "pk")
-              Column(Modifier.press(1f) { hap(TICK); if (on) picked.removeAll { key(it) == key(p) } else picked.add(p) }, horizontalAlignment = Alignment.CenterHorizontally) {
-                Box {
-                  val own = ownIcon(p)
-                  AppIcon(p.name, p.domain, 60.dp, Modifier.graphicsLayer { scaleX = sc; scaleY = sc }, own?.icon, own?.id ?: "")
-                  androidx.compose.animation.AnimatedVisibility(on, Modifier.align(Alignment.TopEnd).offset(7.dp, (-7).dp), enter = scaleIn(calm()) + fadeIn(), exit = scaleOut(calm()) + fadeOut()) {
-                    Box(Modifier.size(24.dp).clip(CircleShape).background(Color.White).padding(1.dp)) { Icon(Icons.Filled.CheckCircle, null, tint = pal.accent) }
+              Box(Modifier.animateItem(fadeInSpec = calm(), placementSpec = calm(), fadeOutSpec = calm()), contentAlignment = Alignment.TopCenter) {
+                Column(Modifier.fillMaxWidth().press(1f, onLongClick = if (mine) ({ hap(TICK); menuFor = k }) else null) {
+                  hap(TICK); if (on) picked.removeAll { key(it) == k } else picked.add(p)
+                }, horizontalAlignment = Alignment.CenterHorizontally) {
+                  Box {
+                    AppIcon(p.name, p.domain, 60.dp, Modifier.graphicsLayer { scaleX = sc; scaleY = sc }, ownIcon(p), "own-$k")
+                    androidx.compose.animation.AnimatedVisibility(on, Modifier.align(Alignment.TopEnd).offset(7.dp, (-7).dp), enter = scaleIn(calm()) + fadeIn(), exit = scaleOut(calm()) + fadeOut()) {
+                      Box(Modifier.size(24.dp).clip(CircleShape).background(Color.White).padding(1.dp)) { Icon(Icons.Filled.CheckCircle, null, tint = pal.accent) }
+                    }
                   }
+                  T(p.name, 12f, lines = 1, modifier = Modifier.padding(top = 6.dp))
+                  if (recorded) T("已记录", 9.5f, FontWeight.Medium, pal.secondary)
                 }
-                T(p.name, 12f, lines = 1, modifier = Modifier.padding(top = 6.dp))
-                if (has) T("已记录", 9.5f, FontWeight.Medium, pal.secondary)
+                DropdownMenu(menuFor == k && mine, { menuFor = null }) {
+                  DropdownMenuItem({ Text("从列表移除", color = Color(0xFFFF453A)) }, {
+                    menuFor = null
+                    if (recorded) confirmRemove = p else removeCustom(p)
+                  }, leadingIcon = { Icon(Icons.Filled.RemoveCircleOutline, null, tint = Color(0xFFFF453A)) })
+                }
               }
             }
             val names = list.map { key(it) }.toSet() + Presets.all.map { key(it) }
@@ -481,7 +527,7 @@ fun PickerSheet(presetIdentity: String?) {
               }
             }
             item(key = "manual") {
-              Column(Modifier.press(0.9f) { manual = true }, horizontalAlignment = Alignment.CenterHorizontally) {
+              Column(Modifier.animateItem(fadeInSpec = calm(), placementSpec = calm(), fadeOutSpec = calm()).press(0.9f) { manual = true }, horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(Modifier.size(60.dp).glass(RoundedCornerShape(14.dp)), contentAlignment = Alignment.Center) { Icon(Icons.Filled.Add, null, tint = pal.primary) }
                 T(if (query.isEmpty()) "手动添加" else "添加“$query”", 12f, color = pal.secondary, lines = 1, modifier = Modifier.padding(top = 6.dp))
               }
@@ -495,9 +541,16 @@ fun PickerSheet(presetIdentity: String?) {
           }
         }
       }
-      if (manual) ManualAdd(query, { manual = false }) { n, d ->
+      confirmRemove?.let { p ->
+        AlertDialog(onDismissRequest = { confirmRemove = null }, title = { Text("从列表移除“${p.name}”？") },
+          text = { Text("只会从这个列表移除，已记录的账号不受影响。") },
+          confirmButton = { TextButton({ confirmRemove = null; removeCustom(p) }) { Text("移除", color = Color(0xFFFF453A)) } },
+          dismissButton = { TextButton({ confirmRemove = null }) { Text("取消") } })
+      }
+      if (manual) ManualAdd(query, { manual = false }) { n, d, ic ->
         val p = Preset(n, cleanDomain(d), presetFor(n, d)?.category ?: "其他", "")
-        Store.rememberApp(p)
+        Store.rememberApp(p, ic)
+        if (ic != null) icons[key(p)] = ic
         if (picked.none { key(it) == key(p) }) picked.add(p)
         query = ""
       }
@@ -505,14 +558,30 @@ fun PickerSheet(presetIdentity: String?) {
       Column {
         SheetBar("返回", "选择身份", "保存", onLeft = { step2 = false }, leftIcon = true) { save() }
         FormScroll {
-          FormGroup("${picked.size} 个网站与 App", "同一个网站有几个账号，可以分别记一条，用账号名区分。") {
-            picked.forEachIndexed { k, p ->
-              if (k > 0) Divider()
+          FormGroup("${picked.size} 个网站与 App", "同一个网站有几个账号，可以分别记一条，用账号名区分。点图标可以更换。") {
+            picked.forEachIndexed { n, p ->
+              if (n > 0) Divider()
+              val k = key(p)
               Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                PickedIcon(p, 36.dp); Spacer(Modifier.width(12.dp))
+                Box {
+                  Box(Modifier.press(0.92f) { iconMenuFor = k }) {
+                    PickedIcon(p, 40.dp)
+                    IconBadge(Modifier.align(Alignment.BottomEnd).offset(5.dp, 5.dp).size(18.dp))
+                  }
+                  DropdownMenu(iconMenuFor == k, { iconMenuFor = null }) {
+                    DropdownMenuItem({ Text("从相册选择") }, {
+                      iconMenuFor = null; photoFor = k
+                      photo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    })
+                    val ph = photos[k]
+                    val custom0 = if (ph != null) ph.isNotEmpty() else (icons[k] != null || hitOf[k] != null || ownIcon(p) != null)
+                    if (custom0) DropdownMenuItem({ Text("使用默认图标") }, { iconMenuFor = null; photos[k] = ""; hap(TICK) })
+                  }
+                }
+                Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                   T(p.name, 16f, FontWeight.SemiBold)
-                  Field(handles[key(p)] ?: "", { handles[key(p)] = it }, "账号名（可选）", size = 14f, raw = true)
+                  Field(handles[k] ?: "", { handles[k] = it }, "账号名（可选）", size = 14f, raw = true)
                 }
               }
             }
@@ -528,17 +597,43 @@ fun PickerSheet(presetIdentity: String?) {
 }
 
 @Composable
-fun ManualAdd(initial: String, onDismiss: () -> Unit, onAdd: (String, String) -> Unit) {
+fun ManualAdd(initial: String, onDismiss: () -> Unit, onAdd: (String, String, String?) -> Unit) {
   var n by remember { mutableStateOf(initial) }
   var d by remember { mutableStateOf("") }
+  var icon by remember { mutableStateOf<String?>(null) }
+  var iconMenu by remember { mutableStateOf(false) }
+  val scope = rememberCoroutineScope()
+  val ctx = androidx.compose.ui.platform.LocalContext.current
+  val hap = haptics()
+  val photo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+    if (uri != null) scope.launch { CustomIcon.fromUri(ctx, uri)?.let { icon = it; hap(TICK) } }
+  }
   AlertDialog(onDismissRequest = onDismiss, title = { Text("手动添加") },
     text = {
       Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+          Box {
+            Column(Modifier.press(0.92f) { iconMenu = true }, horizontalAlignment = Alignment.CenterHorizontally) {
+              Box {
+                AppIcon(n.trim().ifEmpty { "?" }, cleanDomain(d), 64.dp, icon = icon, iconKey = "manual")
+                IconBadge(Modifier.align(Alignment.BottomEnd).offset(6.dp, 6.dp))
+              }
+              T("更换图标", 11f, FontWeight.Medium, pal.accent, Modifier.padding(top = 8.dp))
+            }
+            DropdownMenu(iconMenu, { iconMenu = false }) {
+              DropdownMenuItem({ Text("从相册选择") }, {
+                iconMenu = false
+                photo.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+              })
+              if (icon != null) DropdownMenuItem({ Text("使用默认图标") }, { iconMenu = false; icon = null; hap(TICK) })
+            }
+          }
+        }
         Text("名称必填，填了域名会自动找图标。")
         OutlinedTextField(n, { n = it }, label = { Text("名称") }, singleLine = true)
         OutlinedTextField(d, { d = it }, label = { Text("域名（可选）") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
       }
     },
-    confirmButton = { TextButton({ if (n.isNotBlank()) { onAdd(n.trim(), d); onDismiss() } }, enabled = n.isNotBlank()) { Text("添加") } },
+    confirmButton = { TextButton({ if (n.isNotBlank()) { onAdd(n.trim(), d, icon); onDismiss() } }, enabled = n.isNotBlank()) { Text("添加") } },
     dismissButton = { TextButton(onDismiss) { Text("取消") } })
 }
